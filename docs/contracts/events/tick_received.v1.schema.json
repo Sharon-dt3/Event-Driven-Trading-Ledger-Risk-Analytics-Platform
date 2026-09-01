@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tradepulse.dev/contracts/events/tick_received.v1.schema.json",
+  "title": "TickReceived.v1",
+  "description": "Normalized market tick published to stream `market.ticks` by market-data.",
+  "allOf": [{ "$ref": "envelope.schema.json" }],
+  "properties": {
+    "event_type": { "const": "TickReceived" },
+    "data": { "$ref": "#/$defs/data" }
+  },
+  "$defs": {
+    "data": {
+      "type": "object",
+      "required": ["symbol", "price", "source", "tick_time"],
+      "properties": {
+        "symbol": { "type": "string", "minLength": 1 },
+        "price": { "type": "number", "exclusiveMinimum": 0 },
+        "volume": { "type": "integer", "minimum": 0 },
+        "source": { "type": "string", "enum": ["finnhub", "synthetic"] },
+        "tick_time": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

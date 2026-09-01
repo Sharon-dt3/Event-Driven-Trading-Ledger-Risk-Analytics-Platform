@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tradepulse.dev/contracts/events/trade_requested.v1.schema.json",
+  "title": "TradeRequested.v1",
+  "description": "Trade request payload (REST body for POST /trades; optionally streamed).",
+  "allOf": [{ "$ref": "envelope.schema.json" }],
+  "properties": {
+    "event_type": { "const": "TradeRequested" },
+    "data": { "$ref": "#/$defs/data" }
+  },
+  "$defs": {
+    "data": {
+      "type": "object",
+      "required": ["request_id", "account_id", "symbol", "side", "quantity", "price", "requested_by"],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client idempotency key; ties back to LedgerUpdated.source_event_id."
+        },
+        "account_id": { "type": "string", "minLength": 1 },
+        "symbol": { "type": "string", "minLength": 1 },
+        "side": { "type": "string", "enum": ["BUY", "SELL"] },
+        "quantity": { "type": "number", "exclusiveMinimum": 0 },
+        "price": { "type": "number", "exclusiveMinimum": 0 },
+        "requested_by": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

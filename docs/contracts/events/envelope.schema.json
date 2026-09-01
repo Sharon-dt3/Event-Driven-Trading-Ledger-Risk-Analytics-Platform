@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tradepulse.dev/contracts/events/envelope.schema.json",
+  "title": "EventEnvelope.v1",
+  "description": "Common envelope shared by every event published to Redis Streams. Payload-specific fields live under `data`.",
+  "type": "object",
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "correlation_id",
+    "produced_at",
+    "producer",
+    "data"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique per event; primary idempotency key for consumers."
+    },
+    "event_type": {
+      "type": "string",
+      "enum": ["TickReceived", "TradeRequested", "LedgerUpdated", "RiskComputed"],
+      "description": "Logical event name (without version suffix)."
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+$",
+      "description": "Major version of the payload schema, e.g. \"1\"."
+    },
+    "correlation_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Traces a logical flow across services (propagated end-to-end)."
+    },
+    "produced_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Producer timestamp (RFC3339 / ISO-8601 UTC)."
+    },
+    "producer": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Emitting service name, e.g. market-data, ledger-core, risk-engine."
+    },
+    "data": {
+      "type": "object",
+      "description": "Event-type-specific payload (see per-event schemas)."
+    }
+  },
+  "additionalProperties": false
+}

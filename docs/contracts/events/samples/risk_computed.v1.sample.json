@@ -1,0 +1,18 @@
+{
+  "event_id": "7c6b5a49-3827-4160-9f5e-1d2c3b4a5968",
+  "event_type": "RiskComputed",
+  "schema_version": "1",
+  "correlation_id": "1c2d3e4f-5a6b-7c8d-9e0f-112233445566",
+  "produced_at": "2026-09-01T12:00:01Z",
+  "producer": "risk-engine",
+  "data": {
+    "account_id": "acct_123",
+    "portfolio_value": 25123.45,
+    "pnl": 312.10,
+    "volatility": 0.021,
+    "var": 415.30,
+    "var_method": "parametric",
+    "sharpe": 1.34,
+    "computed_at": "2026-09-01T12:00:01.000Z"
+  }
+}

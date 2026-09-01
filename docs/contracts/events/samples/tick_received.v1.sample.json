@@ -1,0 +1,15 @@
+{
+  "event_id": "b0f6d1a2-8f1e-4c2a-9c1a-0f2e3d4c5b6a",
+  "event_type": "TickReceived",
+  "schema_version": "1",
+  "correlation_id": "1c2d3e4f-5a6b-7c8d-9e0f-112233445566",
+  "produced_at": "2026-09-01T12:00:00Z",
+  "producer": "market-data",
+  "data": {
+    "symbol": "AAPL",
+    "price": 187.42,
+    "volume": 120,
+    "source": "finnhub",
+    "tick_time": "2026-09-01T12:00:00.123Z"
+  }
+}

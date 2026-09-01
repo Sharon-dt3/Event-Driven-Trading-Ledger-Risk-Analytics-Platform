@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tradepulse.dev/contracts/events/ledger_updated.v1.schema.json",
+  "title": "LedgerUpdated.v1",
+  "description": "Committed ledger posting published to stream `ledger.updates` by the ledger outbox publisher. Canonical name is LedgerUpdated; TradePosted is an accepted alias.",
+  "allOf": [{ "$ref": "envelope.schema.json" }],
+  "properties": {
+    "event_type": { "const": "LedgerUpdated" },
+    "data": { "$ref": "#/$defs/data" }
+  },
+  "$defs": {
+    "data": {
+      "type": "object",
+      "required": [
+        "journal_entry_id",
+        "source_event_id",
+        "account_id",
+        "symbol",
+        "side",
+        "quantity",
+        "price",
+        "cash_delta",
+        "position_after",
+        "posted_at"
+      ],
+      "properties": {
+        "journal_entry_id": { "type": "string", "minLength": 1 },
+        "source_event_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Equals TradeRequested.request_id; used for idempotent posting."
+        },
+        "account_id": { "type": "string", "minLength": 1 },
+        "symbol": { "type": "string", "minLength": 1 },
+        "side": { "type": "string", "enum": ["BUY", "SELL"] },
+        "quantity": { "type": "number", "exclusiveMinimum": 0 },
+        "price": { "type": "number", "exclusiveMinimum": 0 },
+        "cash_delta": { "type": "number" },
+        "position_after": { "type": "number" },
+        "posted_at": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

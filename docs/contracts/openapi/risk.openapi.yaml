@@ -1,0 +1,99 @@
+openapi: 3.1.0
+info:
+  title: TradePulse Risk API
+  version: "1.0.0"
+  description: >
+    Read API exposing the latest computed risk metrics per portfolio
+    (portfolio value, P&L, volatility, VaR, Sharpe) and VaR detail.
+    Frozen as v1 in Phase 0.
+servers:
+  - url: /risk
+    description: Risk service base path (behind ALB route /risk)
+tags:
+  - name: risk
+paths:
+  /risk/summary:
+    get:
+      tags: [risk]
+      summary: Latest portfolio value, P&L, volatility, VaR, Sharpe.
+      parameters:
+        - name: account_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Latest risk summary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RiskSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No metrics computed yet for this account.
+  /risk/var:
+    get:
+      tags: [risk]
+      summary: VaR detail, including method.
+      parameters:
+        - name: account_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: method
+          in: query
+          schema: { type: string, enum: [parametric, historical] }
+      responses:
+        "200":
+          description: VaR detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VarDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Unauthorized:
+      description: Missing or invalid credentials.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+    RiskSummary:
+      type: object
+      required: [account_id, portfolio_value, pnl, volatility, var, var_method, sharpe, computed_at]
+      properties:
+        account_id: { type: string }
+        portfolio_value: { type: number }
+        pnl: { type: number }
+        volatility: { type: number, minimum: 0 }
+        var: { type: number, minimum: 0 }
+        var_method: { type: string, enum: [parametric, historical] }
+        sharpe: { type: number }
+        computed_at: { type: string, format: date-time }
+    VarDetail:
+      type: object
+      required: [account_id, var, var_method, confidence, horizon_days, computed_at]
+      properties:
+        account_id: { type: string }
+        var: { type: number, minimum: 0 }
+        var_method: { type: string, enum: [parametric, historical] }
+        confidence: { type: number, examples: [0.95] }
+        horizon_days: { type: integer, minimum: 1, examples: [1] }
+        computed_at: { type: string, format: date-time }
+security:
+  - bearerAuth: []

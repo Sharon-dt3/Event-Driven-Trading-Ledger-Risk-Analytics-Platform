@@ -1,0 +1,236 @@
+openapi: 3.1.0
+info:
+  title: TradePulse Ledger API
+  version: "1.0.0"
+  description: >
+    System-of-record REST API for the double-entry ledger: authentication,
+    balances, positions, trade submission (idempotent), trade history, and the
+    immutable audit log. Frozen as v1 in Phase 0.
+servers:
+  - url: /ledger
+    description: Ledger service base path (behind ALB route /ledger)
+tags:
+  - name: auth
+  - name: balances
+  - name: positions
+  - name: trades
+  - name: audit
+paths:
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Exchange credentials for a JWT.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /balances:
+    get:
+      tags: [balances]
+      summary: Cash balance(s) for the authenticated account.
+      responses:
+        "200":
+          description: Balances.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Balance"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /positions:
+    get:
+      tags: [positions]
+      summary: Current positions per instrument.
+      responses:
+        "200":
+          description: Positions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Position"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /trades:
+    post:
+      tags: [trades]
+      summary: Submit a trade (idempotent via request_id).
+      description: >
+        Posts a filled trade to the ledger. Idempotent by `request_id`; retries
+        do not double-post. Rejections are still recorded in the audit log and
+        return a machine-readable reason.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TradeRequest"
+      responses:
+        "201":
+          description: Trade posted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TradeResult"
+        "409":
+          description: Trade rejected by compliance rules (still audited).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TradeResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    get:
+      tags: [trades]
+      summary: Trade history with status (posted/rejected).
+      parameters:
+        - name: account_id
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [posted, rejected] }
+      responses:
+        "200":
+          description: Trade history.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TradeResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /audit:
+    get:
+      tags: [audit]
+      summary: Queryable immutable audit log (compliance/admin).
+      parameters:
+        - name: account_id
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Audit entries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEntry"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Unauthorized:
+      description: Missing or invalid credentials.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Authenticated but not permitted for this role.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string }
+    LoginResponse:
+      type: object
+      required: [access_token, token_type, role]
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, enum: [Bearer] }
+        role: { type: string, enum: [viewer, trader, compliance, admin] }
+    Balance:
+      type: object
+      required: [account_id, currency, amount]
+      properties:
+        account_id: { type: string }
+        currency: { type: string, examples: [USD] }
+        amount: { type: number }
+    Position:
+      type: object
+      required: [account_id, symbol, quantity, avg_price]
+      properties:
+        account_id: { type: string }
+        symbol: { type: string }
+        quantity: { type: number }
+        avg_price: { type: number }
+    TradeRequest:
+      type: object
+      required: [request_id, account_id, symbol, side, quantity, price]
+      properties:
+        request_id:
+          type: string
+          format: uuid
+          description: Client idempotency key.
+        account_id: { type: string }
+        symbol: { type: string }
+        side: { type: string, enum: [BUY, SELL] }
+        quantity: { type: number, exclusiveMinimum: 0 }
+        price: { type: number, exclusiveMinimum: 0 }
+    TradeResult:
+      type: object
+      required: [request_id, status]
+      properties:
+        request_id: { type: string, format: uuid }
+        journal_entry_id: { type: string }
+        status: { type: string, enum: [posted, rejected] }
+        rejection_reason:
+          type: string
+          enum: [NEGATIVE_CASH, MAX_POSITION_EXCEEDED]
+          description: Present only when status is rejected.
+        posted_at: { type: string, format: date-time }
+    AuditEntry:
+      type: object
+      required: [audit_id, account_id, action, outcome, recorded_at]
+      properties:
+        audit_id: { type: string }
+        account_id: { type: string }
+        action: { type: string }
+        outcome: { type: string, enum: [accepted, rejected] }
+        reason: { type: string }
+        recorded_at: { type: string, format: date-time }
+security:
+  - bearerAuth: []
