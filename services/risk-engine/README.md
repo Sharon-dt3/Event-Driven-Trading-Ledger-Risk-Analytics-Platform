@@ -36,6 +36,24 @@ service path unchanged.
 
 ## Phase 6 — risk metrics (portfolio value, P&L, volatility, VaR, Sharpe)
 
+### Running the worker
+
+**Durable setup (Docker Compose) — recommended.** The stack runs the consumer
+for you: `infra/docker-compose.yml` defines a dedicated **`risk-worker`**
+service (`python -m app.worker`, `restart: unless-stopped`) alongside the
+FastAPI API, and both share the `risk_state` named volume
+(`RISK_DB_PATH=/app/data/risk_state.db`) so they read/write the same durable
+projection. Ledger streaming is on by default (`LEDGER_STREAM_ENABLED=true`),
+so a plain `cd infra && docker compose up -d --build` brings the Risk page to
+life automatically — post a trade (or wait for a tick) and metrics appear. No
+manual worker start and no env prefix required.
+
+**Manual fallback (local dev / single container).** You can still run the
+consumer by hand against a running risk-engine container with
+`docker compose exec risk-engine python -m app.worker`; note this runs in the
+foreground and stops on Ctrl-C or terminal close, which the durable compose
+service above avoids.
+
 The worker is the real `cg:risk-engine` consumer:
 
 - **Consumes** `ledger.updates` (`LedgerUpdated.v1`) on group `cg:risk-engine`,

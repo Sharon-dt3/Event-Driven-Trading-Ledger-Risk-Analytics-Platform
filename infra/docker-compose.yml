@@ -64,7 +64,7 @@ services:
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-tradepulse}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-tradepulse}
       REDIS_URL: "redis://redis:6379/0"
-      LEDGER_STREAM_ENABLED: ${LEDGER_STREAM_ENABLED:-false}
+      LEDGER_STREAM_ENABLED: ${LEDGER_STREAM_ENABLED:-true}
       LEDGER_STREAM_NAME: ${LEDGER_STREAM_NAME:-ledger.updates}
     ports:
       - "${LEDGER_CORE_PORT:-8082}:8082"
@@ -88,8 +88,11 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       REDIS_URL: "redis://redis:6379/0"
       DATABASE_URL: "postgresql://${POSTGRES_USER:-tradepulse}:${POSTGRES_PASSWORD:-tradepulse}@postgres:5432/${POSTGRES_DB:-tradepulse}"
+      RISK_DB_PATH: ${RISK_DB_PATH:-/app/data/risk_state.db}
     ports:
       - "${RISK_ENGINE_PORT:-8083}:8083"
+    volumes:
+      - risk_state:/app/data
     depends_on:
       redis:
         condition: service_healthy
@@ -100,6 +103,28 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Dedicated risk stream consumer: reads ledger.updates + market.ticks and
+  # publishes risk.updates, persisting the durable projection to the shared
+  # risk_state volume (same SQLite file the risk-engine API reads). Running
+  # this as its own service is what makes the Risk page populate automatically
+  # after `docker compose up` — no manual `python -m app.worker` needed.
+  risk-worker:
+    build:
+      context: ../services/risk-engine
+    command: ["python", "-m", "app.worker"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REDIS_URL: "redis://redis:6379/0"
+      RISK_DB_PATH: ${RISK_DB_PATH:-/app/data/risk_state.db}
+    volumes:
+      - risk_state:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      ledger-core:
+        condition: service_started
+    restart: unless-stopped
 
   gateway:
     build:
@@ -139,3 +164,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  risk_state:
