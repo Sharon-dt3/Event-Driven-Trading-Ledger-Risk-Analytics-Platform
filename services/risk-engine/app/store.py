@@ -49,6 +49,22 @@ class RiskStore:
                 symbol TEXT PRIMARY KEY,
                 price  REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS price_history(
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol    TEXT NOT NULL,
+                price     REAL NOT NULL,
+                tick_time TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_price_history_symbol
+                ON price_history(symbol, id);
+            CREATE TABLE IF NOT EXISTS pv_history(
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id  TEXT NOT NULL,
+                pv          REAL NOT NULL,
+                computed_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_pv_history_account
+                ON pv_history(account_id, id);
             """
         )
         self._conn.commit()
@@ -70,6 +86,107 @@ class RiskStore:
             "SELECT price FROM price_cache WHERE symbol=?", (symbol,)
         ).fetchone()
         return float(row[0]) if row else None
+
+    # --- rolling price history (from market.ticks; foundation for stats) --
+    def append_price(self, symbol: str, price: float, window_size: int,
+                     tick_time: Optional[str] = None) -> None:
+        """Append one tick price to the per-symbol rolling window, then evict
+        anything older than the most recent ``window_size + 1`` prices (so up to
+        ``window_size`` returns can be derived). Durable and idempotent-safe to
+        replay in the sense that duplicates simply extend the window and are
+        evicted; metric math consumes only the retained tail.
+        """
+        keep = max(int(window_size), 0) + 1
+        self._conn.execute(
+            "INSERT INTO price_history(symbol, price, tick_time) VALUES(?,?,?)",
+            (symbol, float(price), tick_time),
+        )
+        self._conn.execute(
+            "DELETE FROM price_history WHERE symbol=? AND id NOT IN ("
+            "  SELECT id FROM price_history WHERE symbol=? ORDER BY id DESC LIMIT ?)",
+            (symbol, symbol, keep),
+        )
+        self._conn.commit()
+
+    def price_window(self, symbol: str) -> List[float]:
+        """Retained prices for a symbol, ordered oldest -> newest."""
+        rows = self._conn.execute(
+            "SELECT price FROM ("
+            "  SELECT id, price FROM price_history WHERE symbol=? ORDER BY id DESC"
+            ") ORDER BY id ASC",
+            (symbol,),
+        ).fetchall()
+        return [float(r[0]) for r in rows]
+
+    def history_len(self, symbol: str) -> int:
+        return int(
+            self._conn.execute(
+                "SELECT COUNT(*) FROM price_history WHERE symbol=?", (symbol,)
+            ).fetchone()[0]
+        )
+
+    def returns(self, symbol: str) -> List[float]:
+        """Simple consecutive returns r_i = (p_i - p_{i-1}) / p_{i-1} over the
+        retained window, ordered oldest -> newest. For N retained prices this is
+        N-1 returns; a zero previous price is skipped defensively.
+        """
+        prices = self.price_window(symbol)
+        out: List[float] = []
+        for prev, cur in zip(prices, prices[1:]):
+            if prev == 0:
+                continue
+            out.append((cur - prev) / prev)
+        return out
+
+    # --- rolling portfolio-value history (model A: metric return series) --
+    def append_pv(self, account_id: str, pv: float, window_size: int,
+                  computed_at: Optional[str] = None) -> None:
+        """Append one portfolio-value snapshot to the per-account rolling window
+        (sampled by the 2B throttle), then evict to the most recent
+        ``window_size + 1`` snapshots so up to ``window_size`` PV returns derive.
+        Durable and restart-safe, mirroring the price-history plumbing.
+        """
+        keep = max(int(window_size), 0) + 1
+        self._conn.execute(
+            "INSERT INTO pv_history(account_id, pv, computed_at) VALUES(?,?,?)",
+            (account_id, float(pv), computed_at),
+        )
+        self._conn.execute(
+            "DELETE FROM pv_history WHERE account_id=? AND id NOT IN ("
+            "  SELECT id FROM pv_history WHERE account_id=? ORDER BY id DESC LIMIT ?)",
+            (account_id, account_id, keep),
+        )
+        self._conn.commit()
+
+    def pv_window(self, account_id: str) -> List[float]:
+        """Retained PV snapshots for an account, ordered oldest -> newest."""
+        rows = self._conn.execute(
+            "SELECT pv FROM ("
+            "  SELECT id, pv FROM pv_history WHERE account_id=? ORDER BY id DESC"
+            ") ORDER BY id ASC",
+            (account_id,),
+        ).fetchall()
+        return [float(r[0]) for r in rows]
+
+    def pv_history_len(self, account_id: str) -> int:
+        return int(
+            self._conn.execute(
+                "SELECT COUNT(*) FROM pv_history WHERE account_id=?", (account_id,)
+            ).fetchone()[0]
+        )
+
+    def pv_returns(self, account_id: str) -> List[float]:
+        """Simple consecutive PV returns r_i = (pv_i - pv_{i-1}) / pv_{i-1} over
+        the retained snapshots, ordered oldest -> newest (N snapshots -> N-1
+        returns; a zero previous PV is skipped defensively).
+        """
+        pvs = self.pv_window(account_id)
+        out: List[float] = []
+        for prev, cur in zip(pvs, pvs[1:]):
+            if prev == 0:
+                continue
+            out.append((cur - prev) / prev)
+        return out
 
     # --- ledger event log (idempotent by event_id) ----------------------
     def apply_ledger_event(self, event_id: str, account_id: str, symbol: str,

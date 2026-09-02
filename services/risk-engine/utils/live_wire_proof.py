@@ -52,6 +52,7 @@ import validate_contracts                  # noqa: E402  (Phase 0 validator)
 
 STREAM_LEDGER = "ledger.updates"
 STREAM_RISK = "risk.updates"
+STREAM_TICKS = "market.ticks"
 
 
 def log(m: str) -> None:
@@ -195,6 +196,44 @@ def main() -> int:
         assert published2 == 0, "duplicate must not publish a second RiskComputed"
         assert risk_len_after == risk_len_before, "risk.updates must not grow"
         assert applied_after == applied_before == 1, "exactly one durable effect"
+
+        # 4) Throttled tick-driven recompute (2B) makes volatility live.
+        sep("LIVE: throttle (2B) -> volatility/VaR/Sharpe live on the wire")
+        # Account already holds 10 AAPL @ trade price 100, cash 9000 (scenario 1).
+        # Marks drive PV: 100->10000, 110->10100, 99.9->9999
+        #   PV returns [0.01, -0.01] -> volatility 0.01 (pstdev),
+        #   var = 1.65 * 0.01 * 9999 = 164.98 (parametric), sharpe = 0 (mean 0).
+        marks = [100.0, 110.0, 99.9]
+        for i, mk in enumerate(marks):
+            r.xadd(STREAM_TICKS, {
+                "event_type": "TickReceived",
+                "schema_version": "1",
+                "event": json.dumps({
+                    "event_id": str(uuid.uuid4()), "event_type": "TickReceived",
+                    "schema_version": "1", "correlation_id": cid,
+                    "produced_at": "2026-09-01T12:00:00.500Z",
+                    "producer": "market-data",
+                    "data": {"symbol": "AAPL", "price": mk, "source": "sim",
+                             "tick_time": "2026-09-01T12:00:00.500Z"}}),
+            })
+            worker.refresh_prices()
+            worker.maybe_recompute(now=1000.0 + i * 2.0)  # 2s apart > 1s interval
+        vrisk = read_latest_risk(r)
+        assert vrisk is not None, "no RiskComputed after throttle"
+        vd = vrisk["data"]
+        log("  latest RiskComputed.data after throttle:")
+        log("  " + json.dumps(vd, indent=2).replace("\n", "\n  "))
+        assert vd["portfolio_value"] == 9999.0, vd["portfolio_value"]
+        assert vd["pnl"] == -1.0, vd["pnl"]
+        assert vd["volatility"] == 0.01, vd["volatility"]
+        assert vd["var"] == 164.98, vd["var"]          # parametric 1.65*vol*pv
+        assert vd["sharpe"] == 0.0, vd["sharpe"]
+        errs2 = validate_against_schema(vrisk)
+        if errs2:
+            for e in errs2:
+                log(f"    - {e}")
+            raise AssertionError("throttle RiskComputed failed schema validation")
+        log("  PASS: volatility 0.01 live, VaR 164.98 parametric, schema-valid")
 
         sep("PHASE 6 THIN-SLICE LIVE WIRE PROOF PASSED")
         log("  Real ledger event -> real metric -> RiskComputed on the wire.")

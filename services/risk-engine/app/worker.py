@@ -58,6 +58,8 @@ class RiskWorker:
         self.r = r
         self.consumer = consumer
         self.cfg = config
+        # Monotonic timestamp of the last 2B throttle recompute (None = never).
+        self._last_recompute = None
 
     def ensure_groups(self) -> None:
         for stream in (self.cfg.ticks_stream, self.cfg.ledger_stream):
@@ -131,6 +133,28 @@ class RiskWorker:
         self.refresh_prices()
         return self.drain_ledger()
 
+    def maybe_recompute(self, now: float = None) -> int:
+        """2B throttle: at most one recompute per ``recompute_interval_ms``.
+
+        Coalesces bursts of ticks into a single interval-spaced recompute (not
+        one publish per tick) and fires from price movement alone (no new trade
+        required), because PV changes as marks change. ``now`` is injectable
+        (monotonic seconds) so the cadence is deterministic under test.
+        """
+        current = time.monotonic() if now is None else now
+        if (self._last_recompute is not None
+                and (current - self._last_recompute) * 1000.0
+                < self.cfg.recompute_interval_ms):
+            return 0
+        self._last_recompute = current
+        published = 0
+        for account_id in self.consumer.store.accounts():
+            risk_env = self.consumer.recompute_account(account_id)
+            if risk_env is not None:
+                self._publish(risk_env)
+                published += 1
+        return published
+
 
 def build_worker(config: Config) -> RiskWorker:
     r = redis.from_url(config.redis_url, decode_responses=True)
@@ -158,6 +182,7 @@ def main(argv=None) -> int:
 
     if args.once:
         published = worker.cycle()
+        published += worker.maybe_recompute()
         logger.info("risk_worker_once_done",
                     extra={"extra_fields": {"published": published}})
         return 0
@@ -166,6 +191,7 @@ def main(argv=None) -> int:
     try:
         while True:
             published = worker.cycle()
+            published += worker.maybe_recompute()
             if published == 0:
                 empty += 1
                 if args.idle_exit_cycles and empty >= args.idle_exit_cycles:

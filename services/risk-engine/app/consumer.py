@@ -6,9 +6,14 @@ apply it to the projection, recompute metrics, and build the outgoing
 (XREADGROUP / XACK / XAUTOCLAIM / XADD) lives in `worker.py`, mirroring the
 ledger-core split where `Phase5PocConsumer.handle()` is broker-free.
 
-Recompute strategy (2A): metrics are recomputed and published on each applied
-`ledger.updates` event. `market.ticks` only refresh the latest-price cache; they
-do not themselves trigger a publish in this thin slice.
+Recompute strategy:
+* 2A (retained): each applied `ledger.updates` event recomputes and publishes
+  immediately, so portfolio value / P&L update the instant a trade posts.
+* 2B (added): a throttle samples portfolio value into `pv_history` on a fixed
+  interval; the resulting PV-return series drives volatility/VaR/Sharpe, so risk
+  metrics move with the market (price ticks), not only when a trade posts. The
+  throttle is the sole PV-series sampler; ledger-driven recomputes read the
+  current series read-only. Stream I/O lives in `worker.py`.
 """
 from __future__ import annotations
 
@@ -45,9 +50,12 @@ class RiskConsumer:
         if not symbol or price is None:
             return False
         try:
-            self.store.upsert_price(symbol, float(price))
+            price_f = float(price)
         except (TypeError, ValueError):
             return False
+        self.store.upsert_price(symbol, price_f)
+        self.store.append_price(symbol, price_f, self.config.window_size,
+                                tick_time=data.get("tick_time"))
         return True
 
     # --- ledger.updates: dedupe, apply, recompute, build risk event -----
@@ -90,7 +98,9 @@ class RiskConsumer:
                              correlation_id: Optional[str]) -> Dict[str, Any]:
         cash = self.store.account_cash(account_id, self.config.seed_cash)
         positions = self.store.resolved_positions(account_id)
-        metrics = compute_metrics(cash, positions, self.config.seed_cash)
+        metrics = compute_metrics(
+            cash, positions, self.config.seed_cash,
+            pv_returns=self.store.pv_returns(account_id))
 
         return {
             "event_id": str(uuid.uuid4()),
@@ -121,6 +131,22 @@ class RiskConsumer:
             "schema_version": envelope["schema_version"],
             "event": json.dumps(envelope),
         }
+
+    # --- 2B throttle: sample PV into history, then recompute -------------
+    def recompute_account(self, account_id: str,
+                          correlation_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Throttle-driven recompute (2B). Snapshot the account's current
+        portfolio value into `pv_history`, then build a `RiskComputed.v1` over
+        the resulting PV-return series. Returns None when the account has no
+        positions to value yet (nothing meaningful to sample).
+        """
+        positions = self.store.resolved_positions(account_id)
+        if not positions:
+            return None
+        cash = self.store.account_cash(account_id, self.config.seed_cash)
+        pv = cash + sum(qty * price for _symbol, qty, price in positions)
+        self.store.append_pv(account_id, pv, self.config.window_size)
+        return self._build_risk_envelope(account_id, correlation_id)
 
 
 def _as_float(value: Any) -> Optional[float]:

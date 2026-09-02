@@ -10,15 +10,21 @@ portfolio risk metrics, and publishes them for the live UI.
 - `GET /health`, `GET /healthz` — liveness/readiness JSON.
 - `GET /` — service metadata.
 
-## Phase 6 — thin slice (portfolio value + P&L)
+## Phase 6 — risk metrics (portfolio value, P&L, volatility, VaR, Sharpe)
 
 The worker is the real `cg:risk-engine` consumer:
 
 - **Consumes** `ledger.updates` (`LedgerUpdated.v1`) on group `cg:risk-engine`,
   and `market.ticks` (`TickReceived.v1`) to keep a latest-price cache.
-- **Recomputes on each ledger event** (ledger-driven; ticks only refresh the
-  price cache in this slice), then **publishes** `RiskComputed.v1` to
-  `risk.updates`.
+- **Recompute model:**
+  - *2A (ledger-driven):* each applied ledger event recomputes and publishes
+    immediately, so portfolio value / P&L update the instant a trade posts.
+  - *2B (throttled tick-driven):* a throttle samples portfolio value into a
+    durable rolling `pv_history` every `RISK_RECOMPUTE_INTERVAL_MS` (default
+    1000ms). The resulting portfolio-value return series drives volatility, VaR,
+    and Sharpe, so risk metrics move with the market — not only when a trade
+    posts. The throttle is the sole PV-series sampler.
+  - Both paths **publish** `RiskComputed.v1` to `risk.updates`.
 - **Idempotent & restart-safe by construction:** every consumed event is written
   to a durable SQLite log keyed by envelope `event_id` (`INSERT OR IGNORE`), and
   cash/positions are *derived by SQL* over that deduped log. Dedupe **is** the
@@ -32,11 +38,15 @@ The worker is the real `cg:risk-engine` consumer:
 | Metric | Status in the thin slice |
 |--------|--------------------------|
 | `portfolio_value`, `pnl` | **Live** — computed from cash + marked positions. |
-| `volatility`, `var`, `sharpe` | **Emitted per contract but `0`** until the price-history / tick-driven recompute path is added. |
+| `volatility`, `var`, `sharpe` | **Live** — computed over the throttle-sampled portfolio-value return series (`volatility` = population stddev of PV returns; `var` = `1.65 · volatility · PV`; `sharpe` = mean / volatility). Emitted as `0.0` until at least two PV returns have accrued (window still filling). |
 
-A published `var: 0` therefore means **"not yet computed"**, not "no risk". The
-`RiskComputed.v1` contract requires all fields (`additionalProperties:false`), so
-they are always present.
+A published `var: 0` therefore means **"not enough history yet"**, not "no risk".
+VaR is **parametric only** (~95% one-sided, z = 1.65); **historical VaR is out of
+scope**. The `RiskComputed.v1` contract requires all fields
+(`additionalProperties:false`), so they are always present.
+
+At the default 1000ms interval, a 30-return window needs ~31 seconds of ticks to
+fill; tune `RISK_WINDOW_SIZE` / `RISK_RECOMPUTE_INTERVAL_MS` for faster demos.
 
 **Price fallback:** a symbol's mark is the latest `market.ticks` price, or the
 trade's own price when no tick has arrived yet — so PV/PnL are meaningful before a

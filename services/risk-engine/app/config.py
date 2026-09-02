@@ -39,6 +39,16 @@ class Config:
     min_idle_ms: int = 30000
     poll_block_ms: int = 1000
 
+    # Rolling price-history window per symbol, expressed as the number of
+    # returns retained (the store keeps window_size + 1 prices to produce up to
+    # this many returns). Foundation for volatility/VaR/sharpe; ticks-only.
+    window_size: int = 30
+
+    # 2B throttled tick-driven recompute cadence (ms). Each interval snapshots
+    # portfolio value into pv_history to drive volatility/VaR/sharpe, so those
+    # metrics move with the market rather than only when a trade posts.
+    recompute_interval_ms: int = 1000
+
 
 def _get_float(name: str, default: float) -> float:
     raw = os.getenv(name)
@@ -74,4 +84,7 @@ def from_env() -> Config:
         batch_size=_get_int("RISK_BATCH_SIZE", Config.batch_size),
         min_idle_ms=_get_int("RISK_MIN_IDLE_MS", Config.min_idle_ms),
         poll_block_ms=_get_int("RISK_POLL_BLOCK_MS", Config.poll_block_ms),
+        window_size=_get_int("RISK_WINDOW_SIZE", Config.window_size),
+        recompute_interval_ms=_get_int(
+            "RISK_RECOMPUTE_INTERVAL_MS", Config.recompute_interval_ms),
     )
