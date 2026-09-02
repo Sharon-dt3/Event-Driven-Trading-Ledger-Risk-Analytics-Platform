@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  market-data:
+    name: market-data (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/market-data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./...
+
+  gateway:
+    name: gateway (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/gateway
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./...
+
+  ledger-core:
+    name: ledger-core (Java)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/ledger-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - run: mvn -B -ntp verify
+
+  risk-engine:
+    name: risk-engine (Python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/risk-engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: pytest
+
+  dashboard:
+    name: dashboard (React)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+      - run: npm run lint
+      - run: npm run build

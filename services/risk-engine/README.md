@@ -1,9 +1,25 @@
 # risk-engine (Python / FastAPI)
 
-Computes portfolio value, P&L, volatility, VaR (default parametric), and Sharpe.
-Consumes ledger postings and price snapshots; publishes computed metrics.
+Phase 1 skeleton for the Risk Engine. Later phases consume `ledger.updates` and
+price snapshots derived from `market.ticks`, compute portfolio value / P&L /
+volatility / VaR / Sharpe, and publish `risk.updates`.
 
-- REST contract: `docs/contracts/openapi/risk.openapi.yaml`
-- Consumes streams: `ledger.updates`, `market.ticks`
-- Publishes stream: `risk.updates` (`RiskComputed.v1`)
-- Status: Phase 0 placeholder (implemented in a later phase).
+## Endpoints
+- `GET /health`, `GET /healthz` — liveness/readiness JSON.
+- `GET /` — service metadata.
+
+## Conventions
+- Structured JSON logs to stdout, including `service` and `correlation_id`.
+- Reads/generates and echoes `X-Correlation-ID`.
+
+## Run locally
+```bash
+pip install -r requirements-dev.txt
+uvicorn app.main:app --reload --port 8083
+```
+
+## Lint & test
+```bash
+ruff check .
+pytest
+```

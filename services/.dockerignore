@@ -1,0 +1,16 @@
+# The market-data and gateway images build with `context: ../services` so the
+# shared common-go module is available. Exclude everything not needed by those
+# Go builds to keep the build context small.
+**/node_modules
+**/dist
+**/target
+**/.venv
+**/.venv-verify
+**/.pytest_cache
+**/__pycache__
+**/*.log
+market-data/market-data
+gateway/gateway
+ledger-core/
+risk-engine/
+dashboard/

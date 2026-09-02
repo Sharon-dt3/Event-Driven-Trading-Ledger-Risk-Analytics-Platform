@@ -1,9 +1,24 @@
 # ledger-core (Java / Spring Boot)
 
-System of record. Double-entry posting, compliance checks, immutable audit log,
-transactional outbox, and the Ledger REST API.
+Phase 1 skeleton for the Ledger & Compliance Core (system of record). Later phases
+add double-entry posting, compliance checks, audit log, transactional outbox, and
+the `/trades`, `/balances`, `/positions`, `/audit` REST APIs.
 
-- REST contract: `docs/contracts/openapi/ledger.openapi.yaml`
-- Publishes stream: `ledger.updates` (`LedgerUpdated.v1`)
-- Store: PostgreSQL
-- Status: Phase 0 placeholder (implemented in a later phase).
+## Endpoints
+- `GET /actuator/health` — actuator health (used by compose/CI probes).
+- `GET /health` — simple JSON health.
+- `GET /` — service metadata.
+
+## Conventions
+- Structured JSON logs via logback + logstash encoder, including `service` and `correlation_id`.
+- `CorrelationIdFilter` reads/generates and echoes `X-Correlation-ID` and binds it to the MDC.
+
+## Run locally
+```bash
+mvn spring-boot:run
+```
+
+## Test
+```bash
+mvn -B -ntp verify
+```

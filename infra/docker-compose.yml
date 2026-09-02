@@ -1,0 +1,132 @@
+name: tradepulse
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tradepulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradepulse}
+      POSTGRES_DB: ${POSTGRES_DB:-tradepulse}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tradepulse} -d ${POSTGRES_DB:-tradepulse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  market-data:
+    build:
+      context: ../services
+      dockerfile: market-data/Dockerfile
+    environment:
+      PORT: "8081"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REDIS_ADDR: "redis:6379"
+    ports:
+      - "${MARKET_DATA_PORT:-8081}:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ledger-core:
+    build:
+      context: ../services/ledger-core
+    environment:
+      SERVER_PORT: "8082"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/${POSTGRES_DB:-tradepulse}"
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-tradepulse}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-tradepulse}
+    ports:
+      - "${LEDGER_CORE_PORT:-8082}:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8082'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  risk-engine:
+    build:
+      context: ../services/risk-engine
+    environment:
+      PORT: "8083"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REDIS_URL: "redis://redis:6379/0"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-tradepulse}:${POSTGRES_PASSWORD:-tradepulse}@postgres:5432/${POSTGRES_DB:-tradepulse}"
+    ports:
+      - "${RISK_ENGINE_PORT:-8083}:8083"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8083/health').status==200 else sys.exit(1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  gateway:
+    build:
+      context: ../services
+      dockerfile: gateway/Dockerfile
+    environment:
+      PORT: "8084"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REDIS_ADDR: "redis:6379"
+    ports:
+      - "${GATEWAY_PORT:-8084}:8084"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8084/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  dashboard:
+    build:
+      context: ../services/dashboard
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+    depends_on:
+      ledger-core:
+        condition: service_started
+      risk-engine:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:

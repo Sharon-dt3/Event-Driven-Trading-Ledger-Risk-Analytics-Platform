@@ -1,0 +1,35 @@
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Env
+.env
+
+# Go
+services/*/bin/
+*.test
+# Compiled Go service binaries (named after their module dir)
+services/market-data/market-data
+services/gateway/gateway
+
+# Java
+services/ledger-core/target/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+.venv-verify/
+
+# Node / dashboard
+services/dashboard/node_modules/
+services/dashboard/dist/
+
+# Logs
+logs/
+*.log
