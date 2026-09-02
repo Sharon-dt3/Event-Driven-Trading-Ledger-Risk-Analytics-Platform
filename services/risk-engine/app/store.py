@@ -65,6 +65,16 @@ class RiskStore:
             );
             CREATE INDEX IF NOT EXISTS idx_pv_history_account
                 ON pv_history(account_id, id);
+            CREATE TABLE IF NOT EXISTS risk_snapshots(
+                account_id      TEXT PRIMARY KEY,   -- latest published snapshot
+                portfolio_value REAL NOT NULL,
+                pnl             REAL NOT NULL,
+                volatility      REAL NOT NULL,
+                var             REAL NOT NULL,
+                var_method      TEXT NOT NULL,
+                sharpe          REAL NOT NULL,
+                computed_at     TEXT NOT NULL
+            );
             """
         )
         self._conn.commit()
@@ -264,3 +274,51 @@ class RiskStore:
     def price_map(self) -> Dict[str, float]:
         rows = self._conn.execute("SELECT symbol, price FROM price_cache").fetchall()
         return {r[0]: float(r[1]) for r in rows}
+
+    # --- latest risk snapshot (backs the REST read API) -----------------
+    def save_risk_snapshot(self, account_id: str, portfolio_value: float,
+                           pnl: float, volatility: float, var: float,
+                           var_method: str, sharpe: float,
+                           computed_at: str) -> None:
+        """Upsert the latest computed risk snapshot for an account.
+
+        Written as each ``RiskComputed.v1`` is built (and immediately published),
+        so ``GET /risk/summary`` / ``GET /risk/var`` serve exactly what was last
+        put on ``risk.updates`` — the fetch-on-load stays coherent with the
+        live stream.
+        """
+        self._conn.execute(
+            "INSERT INTO risk_snapshots("
+            "account_id, portfolio_value, pnl, volatility, var, var_method, "
+            "sharpe, computed_at) VALUES(?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(account_id) DO UPDATE SET "
+            "portfolio_value=excluded.portfolio_value, pnl=excluded.pnl, "
+            "volatility=excluded.volatility, var=excluded.var, "
+            "var_method=excluded.var_method, sharpe=excluded.sharpe, "
+            "computed_at=excluded.computed_at",
+            (account_id, float(portfolio_value), float(pnl), float(volatility),
+             float(var), var_method, float(sharpe), computed_at),
+        )
+        self._conn.commit()
+
+    def get_risk_snapshot(self, account_id: str) -> Optional[Dict[str, object]]:
+        """Latest snapshot for an account (contract ``RiskSummary`` shape), or
+        None when nothing has been computed yet (→ REST 404).
+        """
+        row = self._conn.execute(
+            "SELECT account_id, portfolio_value, pnl, volatility, var, "
+            "var_method, sharpe, computed_at FROM risk_snapshots WHERE account_id=?",
+            (account_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "account_id": row[0],
+            "portfolio_value": float(row[1]),
+            "pnl": float(row[2]),
+            "volatility": float(row[3]),
+            "var": float(row[4]),
+            "var_method": row[5],
+            "sharpe": float(row[6]),
+            "computed_at": row[7],
+        }

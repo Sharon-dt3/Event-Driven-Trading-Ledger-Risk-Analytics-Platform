@@ -10,6 +10,30 @@ portfolio risk metrics, and publishes them for the live UI.
 - `GET /health`, `GET /healthz` — liveness/readiness JSON.
 - `GET /` — service metadata.
 
+### Read API (dashboard) — frozen contract `docs/contracts/openapi/risk.openapi.yaml`
+- `GET /risk/summary?account_id=...` — latest `RiskSummary` (portfolio value,
+  P&L, volatility, VaR, Sharpe, `computed_at`); `404` when nothing computed yet.
+- `GET /risk/var?account_id=...` — `VarDetail` (parametric, ~95%, 1-day horizon).
+  `method=historical` is rejected (`400`) as a documented deferral.
+
+**Freshness model:** the read API serves the **last-published** snapshot from a
+durable `risk_snapshots` table (written as each `RiskComputed.v1` is built and
+published), so a dashboard fetch-on-load is coherent with the live
+`risk.updates` stream — the REST answer matches the last event on the wire
+rather than a fresh recompute that could diverge mid-throttle-interval. The API
+process shares the worker's SQLite DB via `RISK_DB_PATH`.
+
+**Error shape:** all error responses use the contract `Error` schema
+(`{code, message}`) — including FastAPI request-validation failures (422), which
+are reshaped from the framework default `{detail: [...]}`. This gives the
+dashboard one uniform, contract-documented error shape across `400/404/422`.
+
+**Path alignment:** the service serves the contract's literal `paths` keys
+(`/risk/summary`, `/risk/var`). The `servers: /risk` entry is an edge-routing
+annotation; the gateway/ALB `/risk` route must forward **path-preserving** (no
+prefix strip), so the dashboard's contract URL (`/risk/summary`) reaches the
+service path unchanged.
+
 ## Phase 6 — risk metrics (portfolio value, P&L, volatility, VaR, Sharpe)
 
 The worker is the real `cg:risk-engine` consumer:
@@ -44,6 +68,10 @@ A published `var: 0` therefore means **"not enough history yet"**, not "no risk"
 VaR is **parametric only** (~95% one-sided, z = 1.65); **historical VaR is out of
 scope**. The `RiskComputed.v1` contract requires all fields
 (`additionalProperties:false`), so they are always present.
+
+**Dashboard read API:** the compute+publish path above is also exposed over REST
+(`GET /risk/summary`, `GET /risk/var`) by serving the last-published snapshot, so
+the dashboard can fetch current state on load and then track the live stream.
 
 At the default 1000ms interval, a 30-return window needs ~31 seconds of ticks to
 fill; tune `RISK_WINDOW_SIZE` / `RISK_RECOMPUTE_INTERVAL_MS` for faster demos.

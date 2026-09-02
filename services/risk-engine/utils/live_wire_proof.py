@@ -15,10 +15,16 @@ This is the "watched it work" bar for the risk engine's first slice. It:
 6. feeds the SAME `LedgerUpdated` again and proves the shipped worker dedupes
    on the wire: exactly one applied effect in the durable projection and exactly
    one `RiskComputed` on the stream.
+7. exercises the ACTUAL shipped REST read API (`app.main`) against the same
+   durable DB and asserts `GET /risk/summary` returns the SAME snapshot that was
+   published to `risk.updates` — identical `computed_at` (the tell that it is the
+   same snapshot, not a coincidentally-equal recompute) — and validates the REST
+   bodies against the frozen `RiskSummary`/`VarDetail` OpenAPI schemas.
 
 Run:  python utils/live_wire_proof.py     (from services/risk-engine)
 
-Requires a `redis-server` binary on PATH. Python: redis, jsonschema, referencing.
+Requires a `redis-server` binary on PATH. Python: redis, jsonschema, referencing,
+httpx (TestClient); PyYAML optional (OpenAPI schema validation, else skipped).
 Exit code is non-zero on any assertion failure.
 """
 from __future__ import annotations
@@ -128,6 +134,33 @@ def validate_against_schema(env: dict) -> list[str]:
             for e in validator.iter_errors(env)]
 
 
+def validate_rest_against_openapi(summary: dict, var_detail: dict) -> str:
+    """Validate the REST read bodies against the FROZEN OpenAPI response schemas
+    (components.schemas.RiskSummary / VarDetail in risk.openapi.yaml). The 3.1
+    spec uses JSON Schema 2020-12, so the component schemas validate directly.
+    Falls back to a note when PyYAML is unavailable (field-level coherence is
+    already asserted by the caller).
+    """
+    try:
+        import yaml  # noqa: E402
+    except ImportError:
+        return ("PyYAML not installed; skipped OpenAPI schema validation "
+                "(field-level coherence already asserted)")
+    spec = yaml.safe_load(
+        (REPO_ROOT / "docs/contracts/openapi/risk.openapi.yaml").read_text())
+    schemas = spec["components"]["schemas"]
+    problems: list[str] = []
+    for name, body in (("RiskSummary", summary), ("VarDetail", var_detail)):
+        validator = Draft202012Validator(schemas[name])
+        for e in validator.iter_errors(body):
+            loc = "/".join(str(p) for p in e.path) or "<root>"
+            problems.append(f"{name}: {loc}: {e.message}")
+    if problems:
+        raise AssertionError(
+            "REST body failed OpenAPI schema validation: " + "; ".join(problems))
+    return "PASS: REST bodies validate against frozen RiskSummary/VarDetail schemas"
+
+
 def main() -> int:
     binary = shutil.which("redis-server")
     if not binary:
@@ -235,10 +268,56 @@ def main() -> int:
             raise AssertionError("throttle RiskComputed failed schema validation")
         log("  PASS: volatility 0.01 live, VaR 164.98 parametric, schema-valid")
 
+        # 5) REST coherence: the dashboard fetch equals the last published event.
+        sep("LIVE: REST /risk/summary coherent with last published RiskComputed")
+        # Point the read API at the SAME durable DB the worker just wrote, then
+        # exercise the ACTUAL shipped FastAPI endpoints (app.main), not the store
+        # directly. This proves fetch-on-load == last event on the wire.
+        os.environ["RISK_DB_PATH"] = db_path
+        from fastapi.testclient import TestClient  # noqa: E402
+        from app.main import app                   # noqa: E402
+
+        published_data = read_latest_risk(r)["data"]
+        client = TestClient(app)
+        resp = client.get("/risk/summary", params={"account_id": "acct_123"})
+        assert resp.status_code == 200, f"summary status {resp.status_code}"
+        summary = resp.json()
+        log("  GET /risk/summary -> "
+            + json.dumps(summary, indent=2).replace("\n", "\n  "))
+        # THE TELL: identical computed_at proves the REST answer is the SAME
+        # snapshot that was published, not a coincidentally-equal recompute.
+        assert summary["computed_at"] == published_data["computed_at"], (
+            f"computed_at mismatch: REST {summary['computed_at']} != "
+            f"stream {published_data['computed_at']}")
+        for field in ("portfolio_value", "pnl", "volatility", "var",
+                      "var_method", "sharpe"):
+            assert summary[field] == published_data[field], (
+                f"{field}: REST {summary[field]} != stream {published_data[field]}")
+
+        # /risk/var detail is coherent with the same published snapshot.
+        vresp = client.get("/risk/var", params={"account_id": "acct_123"})
+        assert vresp.status_code == 200, f"var status {vresp.status_code}"
+        vbody = vresp.json()
+        assert vbody["computed_at"] == published_data["computed_at"], (
+            "var computed_at must match the published snapshot")
+        assert vbody["var"] == published_data["var"], vbody["var"]
+        assert vbody["var_method"] == published_data["var_method"]
+
+        # Unknown account -> contract-shaped 404 {code, message} (dashboard hits
+        # this before any trade exists; must not crash).
+        missing = client.get("/risk/summary", params={"account_id": "nope"})
+        assert missing.status_code == 404, missing.status_code
+        assert set(missing.json().keys()) == {"code", "message"}, missing.json()
+
+        # Validate the REST bodies against the FROZEN OpenAPI response schemas.
+        log("  " + validate_rest_against_openapi(summary, vbody))
+        log("  PASS: REST fetch == last published event (identical computed_at)")
+
         sep("PHASE 6 THIN-SLICE LIVE WIRE PROOF PASSED")
         log("  Real ledger event -> real metric -> RiskComputed on the wire.")
         log("  Emitted envelope validated against the frozen schema.")
         log("  Shipped worker deduped a duplicate live: one effect, one publish.")
+        log("  REST /risk/summary served the SAME snapshot (identical computed_at).")
         return 0
     except AssertionError as ex:
         log(f"\nWIRE PROOF FAILED: {ex}")

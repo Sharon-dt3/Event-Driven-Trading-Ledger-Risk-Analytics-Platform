@@ -102,12 +102,27 @@ class RiskConsumer:
             cash, positions, self.config.seed_cash,
             pv_returns=self.store.pv_returns(account_id))
 
+        computed_at = _now_iso()
+        # Persist the latest snapshot so the REST read API (/risk/summary,
+        # /risk/var) serves exactly what is about to be published to
+        # risk.updates — keeping fetch-on-load coherent with the live stream.
+        self.store.save_risk_snapshot(
+            account_id=account_id,
+            portfolio_value=metrics.portfolio_value,
+            pnl=metrics.pnl,
+            volatility=metrics.volatility,
+            var=metrics.var,
+            var_method=metrics.var_method,
+            sharpe=metrics.sharpe,
+            computed_at=computed_at,
+        )
+
         return {
             "event_id": str(uuid.uuid4()),
             "event_type": "RiskComputed",
             "schema_version": "1",
             "correlation_id": correlation_id or str(uuid.uuid4()),
-            "produced_at": _now_iso(),
+            "produced_at": computed_at,
             "producer": "risk-engine",
             "data": {
                 "account_id": account_id,
@@ -117,7 +132,7 @@ class RiskConsumer:
                 "var": metrics.var,
                 "var_method": metrics.var_method,
                 "sharpe": metrics.sharpe,
-                "computed_at": _now_iso(),
+                "computed_at": computed_at,
             },
         }
 
