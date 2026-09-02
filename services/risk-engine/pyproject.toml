@@ -4,3 +4,11 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+# Ensure the service root (containing the `app` package) is importable when
+# pytest is invoked as a bare console script (as CI does). Without this, the
+# bare `pytest` entrypoint does not add the working directory to sys.path,
+# causing `ModuleNotFoundError: No module named 'app'` during test collection.
+pythonpath = ["."]
+testpaths = ["tests"]
