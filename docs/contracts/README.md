@@ -42,8 +42,13 @@ Run the validator from the repo root to confirm every sample payload validates
 against its schema (the Phase 0 "done" gate):
 
 ```bash
+# one-time (pinned) deps; offline/hermetic thereafter
+pip install -r docs/contracts/requirements.txt
 python utils/validate_contracts.py
 ```
+
+This gate also runs as part of `scripts/verify-native.sh` (the `contracts` row in
+its summary), so a contract-breaking schema or payload change fails verification.
 
 ## Proof of concept (gap + solution)
 

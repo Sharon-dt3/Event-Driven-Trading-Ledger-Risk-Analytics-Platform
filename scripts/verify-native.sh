@@ -287,6 +287,86 @@ verify_node_service() {
 }
 
 # ---------------------------------------------------------------------------
+# Contracts gate (Phase 0): validate sample payloads against their JSON Schemas.
+#
+# Offline & hermetic: reads only local files under docs/contracts/. It prefers
+# the already-installed interpreter when jsonschema + referencing are importable
+# (no network). If they are missing, it attempts a one-off install of the PINNED
+# versions into a tmpfs venv; if that can't happen (e.g. no network), the step is
+# SKIPPED (or FAILED under STRICT), consistent with the rest of this script.
+# ---------------------------------------------------------------------------
+verify_contracts() {
+  local name="contracts"
+  local script="${ROOT_DIR}/utils/validate_contracts.py"
+  local reqs="${ROOT_DIR}/docs/contracts/requirements.txt"
+  hdr "Contracts gate: ${name}"
+
+  if [ ! -f "${script}" ]; then
+    log "${C_YELLOW}${script} not found — skipping${C_RESET}"
+    record "${name}" "SKIP" "validator script missing"
+    return
+  fi
+
+  local PY=""
+  if have python3; then PY="python3"; elif have python; then PY="python"; fi
+  if [ -z "${PY}" ]; then
+    missing_tool "${name}" "python3" || return
+  fi
+
+  # Fast path: deps already importable -> run directly, fully offline.
+  if ${PY} -c "import jsonschema, referencing" >/dev/null 2>&1; then
+    log "-> using preinstalled jsonschema + referencing (offline)"
+    if ${PY} "${script}"; then
+      log "${C_GREEN}${name}: all samples valid${C_RESET}"
+      record "${name}" "PASS" "validate_contracts.py (preinstalled deps)"
+    else
+      log "${C_RED}${name}: FAILED${C_RESET}"
+      record "${name}" "FAIL" "validate_contracts.py"
+    fi
+    return
+  fi
+
+  # Fallback: install pinned deps into a tmpfs venv (may need network).
+  log "${C_YELLOW}jsonschema/referencing not importable — attempting pinned install${C_RESET}"
+  local tmp_root
+  tmp_root="$(mktemp -d "${TMP_BASE}/tp-verify-${name}.XXXXXX" 2>/dev/null)" || {
+    log "${C_RED}Could not create temp dir under ${TMP_BASE}${C_RESET}"
+    record "${name}" "SKIP" "cannot create temp dir for deps"
+    return
+  }
+  local rc=0
+  (
+    VENV="${tmp_root}/venv"
+    ${PY} -m venv --copies "${VENV}" || exit 3
+    # shellcheck disable=SC1091
+    . "${VENV}/bin/activate" || exit 3
+    python -m pip install --quiet --upgrade pip || exit 3
+    if [ -f "${reqs}" ]; then
+      python -m pip install --quiet -r "${reqs}" || exit 3
+    else
+      python -m pip install --quiet "jsonschema==4.23.0" "referencing==0.36.2" || exit 3
+    fi
+    python "${script}" || exit 1
+  )
+  rc=$?
+  rm -rf "${tmp_root}" 2>/dev/null || true
+  case "${rc}" in
+    0) log "${C_GREEN}${name}: all samples valid${C_RESET}"
+       record "${name}" "PASS" "validate_contracts.py (pinned venv)";;
+    1) log "${C_RED}${name}: FAILED (schema validation)${C_RESET}"
+       record "${name}" "FAIL" "validate_contracts.py (validation)";;
+    *) # Could not set up deps (e.g. offline). Treat like a missing toolchain.
+       if [ "${STRICT}" = "1" ]; then
+         log "${C_RED}${name}: could not install deps — STRICT: FAILED${C_RESET}"
+         record "${name}" "FAIL" "cannot install pinned deps"
+       else
+         log "${C_YELLOW}${name}: could not install deps — skipping${C_RESET}"
+         record "${name}" "SKIP" "cannot install pinned deps (offline?)"
+       fi;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # Run all verifications
 # ---------------------------------------------------------------------------
 main() {
@@ -300,6 +380,7 @@ main() {
   verify_python_service
   verify_java_service
   verify_node_service
+  verify_contracts
 
   # -------- Summary --------
   hdr "Summary"

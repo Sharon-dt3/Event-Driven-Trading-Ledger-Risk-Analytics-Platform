@@ -1,0 +1,5 @@
+# Pinned dependencies for the Phase 0 contract validator (utils/validate_contracts.py).
+# Pinned deliberately: ref-resolution behavior can change across releases, and the
+# frozen-contracts gate must not break for reasons unrelated to the contracts.
+jsonschema==4.23.0
+referencing==0.36.2
