@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Phase 5 (Task 1) wiring for the Redis Streams publisher.
@@ -15,6 +16,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
  */
 @Configuration
 @EnableConfigurationProperties(LedgerStreamProperties.class)
+@EnableScheduling
 public class StreamPublisherConfig {
 
     @Bean

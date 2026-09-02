@@ -103,6 +103,25 @@ public class LedgerRepository {
                 eventId, eventType, payload, Boolean.FALSE, createdAt);
     }
 
+    // --- outbox relay (Phase 5): publish-then-mark-sent ---
+
+    /** Unsent outbox rows, oldest first, capped at {@code limit} for batching. */
+    public List<OutboxEvent> findUnsent(int limit) {
+        return jdbc.query(
+                "SELECT event_id, event_type, payload FROM outbox_events "
+                        + "WHERE sent = FALSE ORDER BY created_at LIMIT ?",
+                (rs, i) -> new OutboxEvent(
+                        UUID.fromString(rs.getString("event_id")),
+                        rs.getString("event_type"),
+                        rs.getString("payload")),
+                limit);
+    }
+
+    /** Flip an outbox row to sent=true after it has been published. */
+    public int markSent(UUID eventId) {
+        return jdbc.update("UPDATE outbox_events SET sent = TRUE WHERE event_id = ?", eventId);
+    }
+
     // --- read endpoints ---
 
     public List<TradeResultDto> history(String accountId, String status) {

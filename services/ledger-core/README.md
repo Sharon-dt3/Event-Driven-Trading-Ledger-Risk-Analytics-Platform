@@ -76,7 +76,11 @@ are proven **without Docker**.
 
 ## Scope notes
 Auth uses an in-memory demo credential store; a production build would
-authenticate against the `users` table with hashed passwords. The outbox relay
-(publishing `LedgerUpdated.v1` to Redis) is a separate component; this service
-guarantees the event is written atomically with the ledger change.
+authenticate against the `users` table with hashed passwords. The trade write
+guarantees the `LedgerUpdated.v1` event is persisted atomically with the ledger
+change (transactional outbox). A scheduled **outbox relay** (`stream/OutboxRelay`,
+Phase 5) then drains unsent rows to the `ledger.updates` Redis stream using
+publish-then-mark-sent, giving at-least-once delivery (a crash between publish
+and mark simply re-publishes; consumers dedupe by envelope `event_id`). The
+relay is gated by `ledger.stream.enabled` (off by default).
 ```
