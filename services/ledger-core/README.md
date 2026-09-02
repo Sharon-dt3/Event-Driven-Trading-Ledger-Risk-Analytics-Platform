@@ -60,6 +60,11 @@ Demo credentials (POC only): `demo_trader/trader-pw`, `viewer/viewer-pw`,
 | `LEDGER_JWT_SECRET` | dev secret (rotate!) | HMAC signing key. |
 | `LEDGER_JWT_TTL_SECONDS` | `3600` | Token lifetime. |
 | `LEDGER_MAX_POSITION` | `1000000` | Max absolute net position per symbol. |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis endpoint for the `ledger.updates` stream publisher (Phase 5). |
+| `LEDGER_STREAM_ENABLED` | `false` | Master switch for the outbox→Redis relay (plumbing only in Phase 5 Task 1). |
+| `LEDGER_STREAM_NAME` | `ledger.updates` | Target Redis stream key for `LedgerUpdated.v1`. |
+| `LEDGER_STREAM_POLL_INTERVAL_MS` | `1000` | (Future relay) outbox poll cadence. |
+| `LEDGER_STREAM_BATCH_SIZE` | `100` | (Future relay) max outbox rows drained per poll. |
 
 ## Build & test
 ```bash
