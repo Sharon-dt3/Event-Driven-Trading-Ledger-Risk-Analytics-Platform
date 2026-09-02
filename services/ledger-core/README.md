@@ -74,6 +74,14 @@ Tests run on **H2 in PostgreSQL mode** via Flyway (the same migrations used
 against real Postgres), so double-entry, compliance, and idempotency invariants
 are proven **without Docker**.
 
+Phase 5 streaming is guarded at three levels, all in the default `mvn verify`
+flow unless noted: `Phase5PocConsumerTest` (pure `handle()` dedupe),
+`Phase5PocConsumerPollDedupeTest` (duplicate-delivery idempotency through the
+real `pollOnce()` path with a mocked `StreamOperations` — no Redis), and the
+`REDIS_IT=1`-gated `OutboxRelayLiveRedisTest` / `Phase5PocConsumerLiveRedisTest`
+live wire-path proofs. The end-to-end crash/restart proof lives in
+`poc/native-kill-restart/` (runs against a real `redis-server`).
+
 ## Scope notes
 Auth uses an in-memory demo credential store; a production build would
 authenticate against the `users` table with hashed passwords. The trade write

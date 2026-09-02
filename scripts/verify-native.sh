@@ -179,6 +179,11 @@ verify_python_service() {
 
 # ---------------------------------------------------------------------------
 # Java service (ledger-core): Maven verify
+#
+# `mvn verify` runs the full default suite on H2 (no Docker/Redis), which now
+# includes the Phase 5 duplicate-delivery idempotency guard
+# (Phase5PocConsumerPollDedupeTest). The REDIS_IT-gated live-Redis tests and the
+# poc/native-kill-restart proof are the deeper, broker-backed checks.
 # ---------------------------------------------------------------------------
 verify_java_service() {
   local svc="ledger-core"

@@ -105,6 +105,17 @@ artifacts. Requirements:
 | persisted `processed_events` dedupe | durable processed-events store the real `cg:risk-engine` consumer must add |
 | `redis_client.py` | Redis Streams (`docs/contracts/streams/redis-streams.md`) |
 
+## CI guard (no Redis required)
+
+This manual proof is the strong, end-to-end demonstration. So CI does not depend
+on it (or on a running Redis), the duplicate-delivery idempotency behavior is
+also guarded by a lightweight unit test in the normal `mvn verify` flow:
+`services/ledger-core/.../Phase5PocConsumerPollDedupeTest` drives the consumer's
+real `pollOnce()` path with a mocked `StreamOperations`, feeding two entries that
+share one envelope `event_id` and asserting exactly one applied effect (both
+`XACK`ed). Run this script when you want the full crash/restart proof against a
+real broker; rely on `mvn verify` to catch regressions in day-to-day CI.
+
 ## Limitations (intentional)
 
 - SQLite stands in for PostgreSQL; the outbox/dedupe **pattern** is identical.
