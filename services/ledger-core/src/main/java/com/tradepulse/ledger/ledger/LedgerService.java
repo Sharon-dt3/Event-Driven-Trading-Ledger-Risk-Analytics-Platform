@@ -2,6 +2,7 @@ package com.tradepulse.ledger.ledger;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tradepulse.ledger.domain.ComplianceRules;
 import com.tradepulse.ledger.domain.TradeRequestDto;
 import com.tradepulse.ledger.domain.TradeResultDto;
 import java.math.BigDecimal;
@@ -9,16 +10,20 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Ledger posting logic. Every accepted trade writes, in ONE transaction:
- * the trade row, a balanced double-entry journal (entry + two mirrored lines),
- * the cash update, an audit row, and an outbox event — so effects are atomic.
- * Idempotent by request_id; rejections are still audited.
+ * Application/use-case layer for trade posting. Every accepted trade writes, in
+ * ONE transaction: the trade row, a balanced double-entry journal (entry + two
+ * mirrored lines), the cash update, an audit row, and an outbox event — so
+ * effects are atomic. Idempotent by request_id; rejections are still audited.
+ *
+ * Compliance decisions are delegated to {@link ComplianceRules} (domain layer),
+ * keeping this class focused on orchestration and persistence coordination.
  */
 @Service
 public class LedgerService {
@@ -28,10 +33,13 @@ public class LedgerService {
     }
 
     private final LedgerRepository repo;
+    private final ComplianceRules complianceRules;
     private final ObjectMapper objectMapper;
 
-    public LedgerService(LedgerRepository repo, ObjectMapper objectMapper) {
+    public LedgerService(LedgerRepository repo, ComplianceRules complianceRules,
+                         ObjectMapper objectMapper) {
         this.repo = repo;
+        this.complianceRules = complianceRules;
         this.objectMapper = objectMapper;
     }
 
@@ -52,15 +60,23 @@ public class LedgerService {
         BigDecimal amount = req.price().multiply(req.quantity());
         boolean isBuy = "BUY".equals(req.side());
         BigDecimal cashDelta = isBuy ? amount.negate() : amount;
+        BigDecimal cashAfter = cash.add(cashDelta);
 
-        // 2) Compliance: reject (but still audit) if it would drive cash negative.
-        if (cash.add(cashDelta).compareTo(BigDecimal.ZERO) < 0) {
+        // Projected net position for this symbol if the trade were applied.
+        BigDecimal currentPosition = repo.positionAfter(req.account_id(), req.symbol());
+        BigDecimal signedQty = isBuy ? req.quantity() : req.quantity().negate();
+        BigDecimal positionAfter = currentPosition.add(signedQty);
+
+        // 2) Compliance: reject (but still audit) on the first violated rule.
+        Optional<String> violation = complianceRules.firstViolation(cashAfter, positionAfter);
+        if (violation.isPresent()) {
+            String reason = violation.get();
             repo.insertTrade(UUID.randomUUID(), req.request_id(), req.account_id(), req.symbol(),
-                    req.side(), req.quantity(), req.price(), "rejected", "NEGATIVE_CASH", now);
+                    req.side(), req.quantity(), req.price(), "rejected", reason, now);
             repo.insertAudit(UUID.randomUUID(), req.account_id(), req.request_id(), "POST_TRADE",
-                    "rejected", "NEGATIVE_CASH", now);
+                    "rejected", reason, now);
             return new PostOutcome(
-                    new TradeResultDto(req.request_id(), null, "rejected", "NEGATIVE_CASH", null), true);
+                    new TradeResultDto(req.request_id(), null, "rejected", reason, null), true);
         }
 
         // 3) Accept: trade + balanced journal + cash + audit + outbox (atomic).
@@ -84,7 +100,6 @@ public class LedgerService {
         repo.insertAudit(UUID.randomUUID(), req.account_id(), req.request_id(), "POST_TRADE",
                 "accepted", null, now);
 
-        BigDecimal positionAfter = repo.positionAfter(req.account_id(), req.symbol());
         repo.insertOutbox(UUID.randomUUID(), "LedgerUpdated",
                 buildLedgerUpdatedEnvelope(req, journalEntryId, cashDelta, positionAfter, now), now);
 

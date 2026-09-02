@@ -1,45 +1,77 @@
 # ledger-core (Java / Spring Boot)
 
-System-of-record for TradePulse: the double-entry ledger, audit log, and
-transactional outbox. Phase 2 adds the real PostgreSQL data model with
-correctness invariants enforced by the database.
+Phase 4 **Ledger & Compliance Core** — the system-of-record. A SOLID, clean-
+architecture double-entry ledger with compliance rules, an immutable audit log,
+a transactional outbox, and JWT-secured REST endpoints.
 
-## Data model (Flyway migrations)
+## Architecture (clean layers)
+```
+web (controllers, security, JWT)         ← HTTP + auth boundary
+  → application/use-cases (LedgerService) ← orchestration + @Transactional
+    → domain (ComplianceRules, DTOs)      ← business rules, no framework deps
+    → ledger (LedgerRepository)           ← SQL / persistence
+```
+- **Controllers** (`web/`) handle HTTP, validation, and status mapping only.
+- **LedgerService** coordinates the atomic write and idempotency.
+- **ComplianceRules** (`domain/`) owns the reject/accept policy — add new rules
+  here without touching orchestration (open/closed).
+- **LedgerRepository** owns all SQL; invariants (double-entry, idempotency) are
+  enforced by the DB schema too (UNIQUE `source_event_id`, debit/credit checks).
 
-Migrations live in `src/main/resources/db/migration` and run automatically on
-startup (and in tests):
+## Trade posting use-case
+Each accepted trade writes, in **one DB transaction**:
+1. the `trades` row,
+2. a balanced double-entry `journal_entries` + two `journal_lines`,
+3. the `accounts.cash_balance` update,
+4. an `audit_log` row,
+5. an `outbox_events` row carrying a `LedgerUpdated.v1` envelope.
 
-| Migration | Tables |
-|-----------|--------|
-| `V1__users_accounts.sql` | `users`, `accounts` (cash as `NUMERIC`, non-negative CHECK) |
-| `V2__trades.sql` | `trades` (`request_id` UNIQUE idempotency key; side/status/amount CHECKs; indexes) |
-| `V3__journal.sql` | `journal_entries` (`source_event_id` UNIQUE), `journal_lines` (debit-XOR-credit CHECK) |
-| `V4__audit_outbox.sql` | `audit_log`, `outbox_events` |
-| `V5__seed_demo_account.sql` | demo trader + funded `acct_123` ($10,000) |
+Compliance rules reject (but still **audit**) when a trade would:
+- drive cash negative → `NEGATIVE_CASH`;
+- exceed the configured position limit → `MAX_POSITION_EXCEEDED`.
 
-### Invariants (enforced in the DB, not just code)
-- **Idempotency:** `trades.request_id` and `journal_entries.source_event_id` are `UNIQUE` — the same trade can never post twice.
-- **Double-entry:** every posting writes mirrored debit/credit lines; each line is a debit XOR a credit; debits == credits.
-- **No negative cash:** `accounts.cash_balance >= 0`; over-spend is rejected (and audited) with `NEGATIVE_CASH`.
-- **Exact money:** `NUMERIC(20,4)` / `BigDecimal`, never floats.
+**Idempotency (Phase 4 "done when"):** duplicate `request_id`s never double-post.
+Enforced in code (return the original outcome) and by the database
+(`journal_entries.source_event_id UNIQUE`). Proven at the service layer and
+end-to-end over HTTP (`201` then `200`, one journal entry, unchanged cash).
 
-## Endpoints (see docs/contracts/openapi/ledger.openapi.yaml)
-- `POST /trades` — submit a trade. `201` posted, `200` idempotent replay, `409` rejected (still audited), `404` unknown account.
+## REST endpoints (behind ALB `/ledger`)
+- `POST /auth/login` — exchange credentials for a JWT (`{access_token, token_type, role}`).
+- `POST /trades` — submit a trade (idempotent by `request_id`). `201` posted,
+  `409` rejected-by-compliance (still audited).
 - `GET /trades?account_id=&status=` — trade history.
 - `GET /balances?account_id=` — cash balances.
-- `GET /audit?account_id=` — immutable audit log.
-- `GET /health` — liveness.
+- `GET /positions?account_id=` — net position + average buy price per instrument.
+- `GET /audit?account_id=` — immutable audit log (**compliance/admin** roles only).
+- `GET /health`, `GET /` — liveness + metadata (public).
 
-## Run locally (real Postgres)
-```bash
-# from repo root, with Docker available
-make up
-```
-Uses `SPRING_DATASOURCE_URL/USERNAME/PASSWORD` from `infra/docker-compose.yml`.
+## Auth
+Stateless **JWT (HS256)**. The service both mints (at `/auth/login`) and validates
+tokens with a shared secret; the `role` claim maps to a Spring Security authority.
+Demo credentials (POC only): `demo_trader/trader-pw`, `viewer/viewer-pw`,
+`compliance/compliance-pw`, `admin/admin-pw`.
 
-## Test (no Docker required)
+## Configuration (env)
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `SERVER_PORT` | `8082` | HTTP port. |
+| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/tradepulse` | DB URL. |
+| `SPRING_DATASOURCE_USERNAME` / `_PASSWORD` | `tradepulse` | DB creds. |
+| `LEDGER_JWT_SECRET` | dev secret (rotate!) | HMAC signing key. |
+| `LEDGER_JWT_TTL_SECONDS` | `3600` | Token lifetime. |
+| `LEDGER_MAX_POSITION` | `1000000` | Max absolute net position per symbol. |
+
+## Build & test
 ```bash
 mvn -B verify
 ```
-Tests run against **H2 in PostgreSQL mode** with the same Flyway migrations, and
-prove: debits = credits, audit written, and idempotent no-double-post.
+Tests run on **H2 in PostgreSQL mode** via Flyway (the same migrations used
+against real Postgres), so double-entry, compliance, and idempotency invariants
+are proven **without Docker**.
+
+## Scope notes
+Auth uses an in-memory demo credential store; a production build would
+authenticate against the `users` table with hashed passwords. The outbox relay
+(publishing `LedgerUpdated.v1` to Redis) is a separate component; this service
+guarantees the event is written atomically with the ledger change.
+```

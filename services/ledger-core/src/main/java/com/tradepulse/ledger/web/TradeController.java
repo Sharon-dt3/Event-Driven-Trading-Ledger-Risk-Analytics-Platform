@@ -2,6 +2,7 @@ package com.tradepulse.ledger.web;
 
 import com.tradepulse.ledger.domain.AuditEntryDto;
 import com.tradepulse.ledger.domain.BalanceDto;
+import com.tradepulse.ledger.domain.PositionDto;
 import com.tradepulse.ledger.domain.TradeRequestDto;
 import com.tradepulse.ledger.domain.TradeResultDto;
 import com.tradepulse.ledger.ledger.LedgerReadService;
@@ -56,6 +57,11 @@ public class TradeController {
     @GetMapping("/balances")
     public List<BalanceDto> balances(@RequestParam(required = false) String account_id) {
         return readService.balances(account_id);
+    }
+
+    @GetMapping("/positions")
+    public List<PositionDto> positions(@RequestParam(required = false) String account_id) {
+        return readService.positions(account_id);
     }
 
     @GetMapping("/audit")

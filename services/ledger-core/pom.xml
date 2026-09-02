@@ -15,7 +15,7 @@
     <artifactId>ledger-core</artifactId>
     <version>0.1.0</version>
     <name>ledger-core</name>
-    <description>TradePulse Ledger &amp; Compliance Core (Phase 2 database &amp; ledger model)</description>
+    <description>TradePulse Ledger &amp; Compliance Core (Phase 4 clean-architecture ledger, compliance, audit, JWT)</description>
 
     <properties>
         <java.version>17</java.version>
@@ -30,6 +30,16 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
+        <!-- Phase 4: JWT auth (mint + validate) via resource server + Nimbus -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
         </dependency>
 
         <!-- Phase 2: persistence + migrations -->
@@ -66,6 +76,11 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

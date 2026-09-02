@@ -2,6 +2,7 @@ package com.tradepulse.ledger.ledger;
 
 import com.tradepulse.ledger.domain.AuditEntryDto;
 import com.tradepulse.ledger.domain.BalanceDto;
+import com.tradepulse.ledger.domain.PositionDto;
 import com.tradepulse.ledger.domain.TradeResultDto;
 import java.util.List;
 import org.springframework.stereotype.Service;
@@ -25,6 +26,11 @@ public class LedgerReadService {
     @Transactional(readOnly = true)
     public List<BalanceDto> balances(String accountId) {
         return repo.balances(accountId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<PositionDto> positions(String accountId) {
+        return repo.positions(accountId);
     }
 
     @Transactional(readOnly = true)

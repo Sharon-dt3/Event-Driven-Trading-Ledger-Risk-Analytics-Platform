@@ -14,6 +14,6 @@ public class HealthController {
 
     @GetMapping("/")
     public Map<String, Object> root() {
-        return Map.of("service", "ledger-core", "version", "0.1.0");
+        return Map.of("service", "ledger-core", "version", "0.4.0");
     }
 }

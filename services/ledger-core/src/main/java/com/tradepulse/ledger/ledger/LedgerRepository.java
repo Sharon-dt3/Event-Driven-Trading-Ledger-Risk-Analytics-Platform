@@ -2,6 +2,7 @@ package com.tradepulse.ledger.ledger;
 
 import com.tradepulse.ledger.domain.AuditEntryDto;
 import com.tradepulse.ledger.domain.BalanceDto;
+import com.tradepulse.ledger.domain.PositionDto;
 import com.tradepulse.ledger.domain.TradeResultDto;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -153,6 +154,28 @@ public class LedgerRepository {
                         rs.getString("outcome"),
                         rs.getString("reason"),
                         rs.getObject("recorded_at", OffsetDateTime.class)),
+                args.toArray());
+    }
+
+    public List<PositionDto> positions(String accountId) {
+        StringBuilder sql = new StringBuilder(
+                "SELECT account_id AS account_id, symbol AS symbol, "
+                        + "SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) AS qty, "
+                        + "CASE WHEN SUM(CASE WHEN side = 'BUY' THEN quantity ELSE 0 END) > 0 "
+                        + "THEN SUM(CASE WHEN side = 'BUY' THEN quantity * price ELSE 0 END) "
+                        + "/ SUM(CASE WHEN side = 'BUY' THEN quantity ELSE 0 END) ELSE 0 END AS avg_price "
+                        + "FROM trades WHERE status = 'posted'");
+        List<Object> args = new ArrayList<>();
+        if (accountId != null) {
+            sql.append(" AND account_id = ?");
+            args.add(accountId);
+        }
+        sql.append(" GROUP BY account_id, symbol "
+                + "HAVING SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) <> 0 "
+                + "ORDER BY symbol");
+        return jdbc.query(sql.toString(),
+                (rs, i) -> new PositionDto(rs.getString("account_id"), rs.getString("symbol"),
+                        rs.getBigDecimal("qty"), rs.getBigDecimal("avg_price")),
                 args.toArray());
     }
 
