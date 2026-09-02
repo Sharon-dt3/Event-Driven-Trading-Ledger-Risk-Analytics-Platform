@@ -2,12 +2,18 @@ import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 
-const DEMO = [
-  { username: 'demo_trader', password: 'trader-pw', role: 'trader' },
-  { username: 'viewer', password: 'viewer-pw', role: 'viewer' },
-  { username: 'compliance', password: 'compliance-pw', role: 'compliance' },
-  { username: 'admin', password: 'admin-pw', role: 'admin' },
-];
+// Demo logins are a development-only convenience. They are gated behind
+// Vite's `import.meta.env.DEV` flag so that the credentials are NOT rendered
+// in the UI and NOT included in the production build that nginx serves.
+// Never rely on these for anything other than local development.
+const DEMO = import.meta.env.DEV
+  ? [
+      { username: 'demo_trader', password: 'trader-pw', role: 'trader' },
+      { username: 'viewer', password: 'viewer-pw', role: 'viewer' },
+      { username: 'compliance', password: 'compliance-pw', role: 'compliance' },
+      { username: 'admin', password: 'admin-pw', role: 'admin' },
+    ]
+  : [];
 
 export function Login() {
   const { login } = useAuth();
@@ -15,8 +21,10 @@ export function Login() {
   const location = useLocation();
   const from = location.state?.from?.pathname || '/';
 
-  const [username, setUsername] = useState('demo_trader');
-  const [password, setPassword] = useState('trader-pw');
+  // Do not pre-fill real credentials in production. In dev, prefill the
+  // lowest-privilege trader account only as a convenience.
+  const [username, setUsername] = useState(import.meta.env.DEV ? 'demo_trader' : '');
+  const [password, setPassword] = useState(import.meta.env.DEV ? 'trader-pw' : '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -59,26 +67,28 @@ export function Login() {
           {loading ? 'Signing in…' : 'Sign in'}
         </button>
 
-        <div className="login__demo">
-          <span>Demo logins:</span>
-          <ul>
-            {DEMO.map((d) => (
-              <li key={d.username}>
-                <button
-                  type="button"
-                  className="linkbtn"
-                  onClick={() => {
-                    setUsername(d.username);
-                    setPassword(d.password);
-                  }}
-                >
-                  {d.username}
-                </button>
-                <em>{d.role}</em>
-              </li>
-            ))}
-          </ul>
-        </div>
+        {DEMO.length > 0 && (
+          <div className="login__demo">
+            <span>Demo logins (dev only):</span>
+            <ul>
+              {DEMO.map((d) => (
+                <li key={d.username}>
+                  <button
+                    type="button"
+                    className="linkbtn"
+                    onClick={() => {
+                      setUsername(d.username);
+                      setPassword(d.password);
+                    }}
+                  >
+                    {d.username}
+                  </button>
+                  <em>{d.role}</em>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </form>
     </div>
   );
