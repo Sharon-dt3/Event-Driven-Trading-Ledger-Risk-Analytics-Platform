@@ -15,7 +15,7 @@
     <artifactId>ledger-core</artifactId>
     <version>0.1.0</version>
     <name>ledger-core</name>
-    <description>TradePulse Ledger &amp; Compliance Core (Phase 1 skeleton)</description>
+    <description>TradePulse Ledger &amp; Compliance Core (Phase 2 database &amp; ledger model)</description>
 
     <properties>
         <java.version>17</java.version>
@@ -31,12 +31,38 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+
+        <!-- Phase 2: persistence + migrations -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
         <dependency>
             <groupId>net.logstash.logback</groupId>
             <artifactId>logstash-logback-encoder</artifactId>
             <version>${logstash-logback.version}</version>
         </dependency>
 
+        <!-- Test: embedded Postgres-compatible DB so invariants can be proven without Docker -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
