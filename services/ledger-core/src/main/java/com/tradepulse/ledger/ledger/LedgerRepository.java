@@ -31,7 +31,8 @@ public class LedgerRepository {
 
     public Optional<TradeResultDto> findTradeByRequestId(UUID requestId) {
         List<TradeResultDto> rows = jdbc.query(
-                "SELECT t.request_id, je.journal_entry_id, t.status, t.rejection_reason, je.posted_at "
+                "SELECT t.request_id, je.journal_entry_id, t.symbol, t.side, t.quantity, t.price, "
+                        + "t.status, t.rejection_reason, je.posted_at "
                         + "FROM trades t "
                         + "LEFT JOIN journal_entries je ON je.source_event_id = t.request_id "
                         + "WHERE t.request_id = ?",
@@ -126,7 +127,8 @@ public class LedgerRepository {
 
     public List<TradeResultDto> history(String accountId, String status) {
         StringBuilder sql = new StringBuilder(
-                "SELECT t.request_id, je.journal_entry_id, t.status, t.rejection_reason, je.posted_at "
+                "SELECT t.request_id, je.journal_entry_id, t.symbol, t.side, t.quantity, t.price, "
+                        + "t.status, t.rejection_reason, je.posted_at "
                         + "FROM trades t "
                         + "LEFT JOIN journal_entries je ON je.source_event_id = t.request_id WHERE 1=1");
         List<Object> args = new ArrayList<>();
@@ -204,6 +206,10 @@ public class LedgerRepository {
             return new TradeResultDto(
                     UUID.fromString(rs.getString("request_id")),
                     je,
+                    rs.getString("symbol"),
+                    rs.getString("side"),
+                    rs.getBigDecimal("quantity"),
+                    rs.getBigDecimal("price"),
                     rs.getString("status"),
                     rs.getString("rejection_reason"),
                     rs.getObject("posted_at", OffsetDateTime.class));

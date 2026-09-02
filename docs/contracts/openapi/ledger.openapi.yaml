@@ -216,6 +216,10 @@ components:
       properties:
         request_id: { type: string, format: uuid }
         journal_entry_id: { type: string }
+        symbol: { type: string }
+        side: { type: string, enum: [BUY, SELL] }
+        quantity: { type: number, exclusiveMinimum: 0 }
+        price: { type: number, exclusiveMinimum: 0 }
         status: { type: string, enum: [posted, rejected] }
         rejection_reason:
           type: string

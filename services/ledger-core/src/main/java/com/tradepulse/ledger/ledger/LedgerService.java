@@ -76,7 +76,8 @@ public class LedgerService {
             repo.insertAudit(UUID.randomUUID(), req.account_id(), req.request_id(), "POST_TRADE",
                     "rejected", reason, now);
             return new PostOutcome(
-                    new TradeResultDto(req.request_id(), null, "rejected", reason, null), true);
+                    new TradeResultDto(req.request_id(), null, req.symbol(), req.side(),
+                            req.quantity(), req.price(), "rejected", reason, null), true);
         }
 
         // 3) Accept: trade + balanced journal + cash + audit + outbox (atomic).
@@ -104,7 +105,8 @@ public class LedgerService {
                 buildLedgerUpdatedEnvelope(req, journalEntryId, cashDelta, positionAfter, now), now);
 
         return new PostOutcome(
-                new TradeResultDto(req.request_id(), journalEntryId.toString(), "posted", null, now), true);
+                new TradeResultDto(req.request_id(), journalEntryId.toString(), req.symbol(),
+                        req.side(), req.quantity(), req.price(), "posted", null, now), true);
     }
 
     /** Serializes a LedgerUpdated.v1 envelope (matches docs/contracts/events). */

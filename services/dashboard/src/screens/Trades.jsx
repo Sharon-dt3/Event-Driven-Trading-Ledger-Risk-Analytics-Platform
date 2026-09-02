@@ -142,6 +142,10 @@ export function Trades() {
           <thead>
             <tr>
               <th>Time</th>
+              <th>Symbol</th>
+              <th>Side</th>
+              <th className="num">Quantity</th>
+              <th className="num">Price</th>
               <th>Status</th>
               <th>Reason</th>
               <th>Entry</th>
@@ -152,6 +156,16 @@ export function Trades() {
             {(history.data || []).map((t, i) => (
               <tr key={`${t.request_id}-${i}`}>
                 <td>{fmtTime(t.posted_at)}</td>
+                <td>{t.symbol || '—'}</td>
+                <td>
+                  {t.side ? (
+                    <span className={`pill pill--${t.side.toLowerCase()}`}>{t.side}</span>
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td className="num">{t.quantity == null ? '—' : fmtNum(t.quantity, 4)}</td>
+                <td className="num">{t.price == null ? '—' : fmtMoney(t.price)}</td>
                 <td>
                   <span className={`pill pill--${t.status}`}>{t.status}</span>
                 </td>
