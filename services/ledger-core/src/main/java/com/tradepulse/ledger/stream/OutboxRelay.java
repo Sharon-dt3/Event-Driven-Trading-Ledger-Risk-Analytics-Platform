@@ -105,8 +105,11 @@ public class OutboxRelay {
             if (node.hasNonNull("schema_version")) {
                 schemaVersion = node.get("schema_version").asText();
             }
-        } catch (Exception ignored) {
-            // Fall back to the default schema version if payload isn't parseable.
+        } catch (Exception ex) {
+            // Fall back to the default schema version, but leave a trace: our own
+            // serialized envelope failing to parse signals a real contract drift.
+            log.warn("could not parse schema_version from outbox event {}; defaulting to '{}'",
+                    event.eventId(), schemaVersion, ex);
         }
         Map<String, String> fields = new LinkedHashMap<>();
         fields.put("event_type", event.eventType());

@@ -15,7 +15,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * the bean exists and can XADD when enabled, but nothing invokes it yet.
  */
 @Configuration
-@EnableConfigurationProperties(LedgerStreamProperties.class)
+@EnableConfigurationProperties({LedgerStreamProperties.class, Phase5ConsumerProperties.class})
 @EnableScheduling
 public class StreamPublisherConfig {
 

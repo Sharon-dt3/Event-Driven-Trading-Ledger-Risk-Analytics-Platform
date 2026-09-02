@@ -83,4 +83,12 @@ Phase 5) then drains unsent rows to the `ledger.updates` Redis stream using
 publish-then-mark-sent, giving at-least-once delivery (a crash between publish
 and mark simply re-publishes; consumers dedupe by envelope `event_id`). The
 relay is gated by `ledger.stream.enabled` (off by default).
+
+A minimal **idempotent POC consumer** (`stream/Phase5PocConsumer`, Phase 5 Task 3)
+reads `ledger.updates` via `XREADGROUP` on the throwaway group `cg:phase5-poc`,
+dedupes strictly by envelope `event_id`, applies a trivial projection, then
+`XACK`s. On each cycle it first runs `XAUTOCLAIM` to reclaim stale pending
+entries from a crashed consumer and reprocess them; the dedupe makes a reclaimed
+(already-applied) entry a no-op, so restart-recovery never double-applies. Gated
+by `ledger.consumer.enabled` (off by default).
 ```
