@@ -160,6 +160,10 @@ h3 { margin-top: 1.75rem; color: var(--muted); font-weight: 600; }
 .explain__metric dt { color: var(--accent); font-weight: 600; font-size: 0.9rem; }
 .explain__metric dd { margin: 0; font-size: 0.9rem; line-height: 1.4; }
 .explain__notes { margin: 1rem 0 0; padding-left: 1.1rem; font-size: 0.82rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.explain__badges { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.explain__toggle { color: var(--muted); cursor: pointer; }
+.explain__toggle input { accent-color: var(--accent); }
+.pill--ai { background: rgba(76, 141, 255, 0.15); color: var(--accent); }
 @media (max-width: 620px) {
   .explain__metric { grid-template-columns: 1fr; gap: 0.15rem; }
 }

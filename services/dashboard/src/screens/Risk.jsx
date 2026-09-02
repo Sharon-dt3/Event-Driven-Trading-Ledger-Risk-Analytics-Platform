@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useAsync } from '../hooks/useAsync';
@@ -16,14 +17,32 @@ function Metric({ label, value, sub }) {
   );
 }
 
-function Explainability({ narrative, isLive }) {
+function Explainability({ narrative, isLive, aiAvailable, aiOn, onToggleAi, aiLoading, aiError }) {
   if (!narrative) return null;
+  const isAi = narrative.mode === 'llm';
   return (
     <div className="panel explain">
       <div className="section-head">
         <h3>What this means</h3>
-        <span className="muted">{isLive ? 'live analysis' : 'analysis'}</span>
+        <div className="explain__badges">
+          {isAi ? (
+            <span className="pill pill--ai">AI explanation</span>
+          ) : (
+            <span className="muted">{isLive ? 'live analysis' : 'analysis'}</span>
+          )}
+          {aiAvailable && (
+            <label className="field field--inline explain__toggle">
+              <input type="checkbox" checked={aiOn} onChange={(e) => onToggleAi(e.target.checked)} />
+              <span>{aiLoading ? 'Generating AI…' : 'AI explanation'}</span>
+            </label>
+          )}
+        </div>
       </div>
+
+      {aiError && (
+        <p className="muted">AI explanation unavailable right now — showing the standard analysis.</p>
+      )}
+
       <p className="explain__headline">{narrative.headline}</p>
       <p className="muted">{narrative.summary}</p>
 
@@ -70,6 +89,28 @@ export function Risk() {
   const summary = useAsync(() => api.riskSummary(account), [account]);
   const varDetail = useAsync(() => api.riskVar(account, 'parametric'), [account]);
 
+  // Optional grounded AI explanation: only offered when the server advertises it.
+  const [aiAvailable, setAiAvailable] = useState(false);
+  const [aiOn, setAiOn] = useState(false);
+  const [aiNarrative, setAiNarrative] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .riskExplainCapabilities()
+      .then((c) => {
+        if (!cancelled) setAiAvailable(!!(c && c.llm_enabled));
+      })
+      .catch(() => {
+        if (!cancelled) setAiAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Prefer the live SSE snapshot when it matches the selected account; fall back
   // to the REST summary (fetch-on-load, coherent with the last published event).
   const live = liveRisk && liveRisk.account_id === account ? liveRisk : null;
@@ -79,7 +120,45 @@ export function Risk() {
   // risk.updates events for this account (riskLog is most-recent-first).
   const accountLog = (riskLog || []).filter((r) => r.account_id === account);
   const previous = live && accountLog.length > 1 ? accountLog[1] : null;
-  const narrative = s ? buildRiskNarrative(s, previous) : null;
+  const ruleNarrative = s ? buildRiskNarrative(s, previous) : null;
+
+  // Fetch the grounded AI rewrite on demand (and refresh it as the snapshot
+  // changes while the toggle is on). Falls back silently to the rule-based text.
+  useEffect(() => {
+    if (!aiOn || !s) {
+      setAiNarrative(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setAiLoading(true);
+    setAiError(false);
+    api
+      .riskExplain(account, 'llm')
+      .then((data) => {
+        if (cancelled) return;
+        if (data && data.mode === 'llm') setAiNarrative(data);
+        else {
+          setAiNarrative(null);
+          setAiError(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAiNarrative(null);
+          setAiError(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setAiLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Re-run when the account changes or a new snapshot arrives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiOn, account, s && s.computed_at]);
+
+  const narrative = aiOn && aiNarrative ? aiNarrative : ruleNarrative;
 
   const refresh = () => {
     summary.run().catch(() => {});
@@ -122,7 +201,15 @@ export function Risk() {
             </div>
             <p className="muted">Computed at {fmtTime(s.computed_at)}</p>
 
-            <Explainability narrative={narrative} isLive={!!live} />
+            <Explainability
+              narrative={narrative}
+              isLive={!!live}
+              aiAvailable={aiAvailable}
+              aiOn={aiOn}
+              onToggleAi={setAiOn}
+              aiLoading={aiLoading}
+              aiError={aiError}
+            />
           </>
         )}
 

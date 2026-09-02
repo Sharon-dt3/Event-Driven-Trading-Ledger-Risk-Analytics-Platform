@@ -35,6 +35,7 @@ from .correlation import (
     set_correlation_id,
 )
 from .explain import explain_snapshot
+from .llm_explain import generate_llm_narrative, is_enabled as llm_enabled
 from .logging_config import configure_logging
 from .store import RiskStore
 
@@ -172,13 +173,20 @@ def risk_var(account_id: str, method: Optional[str] = None):
 
 
 @app.get("/risk/explain")
-def risk_explain(account_id: str):
+def risk_explain(account_id: str, mode: Optional[str] = None):
     """Plain-language explainability layer over the latest risk snapshot.
 
     Turns portfolio value, P&L, volatility, VaR and Sharpe into human-readable
     analysis for users without financial expertise. Additive to the frozen
     contracts (does not alter RiskSummary/RiskComputed). Returns 404 (contract
     ``Error`` shape) when no metrics have been computed for the account yet.
+
+    Modes:
+    - default (``mode`` omitted or ``rule``): deterministic, rule-based text.
+    - ``mode=llm``: an OPTIONAL, grounded LLM rewrite of the same facts. Requires
+      ``RISK_LLM_ENABLED=true`` and an API key; if disabled or the call fails, it
+      transparently falls back to the rule-based text. The served ``mode`` field
+      reflects what was actually produced (``rule`` or ``llm``).
 
     Note: the store keeps only the latest snapshot per account, so this endpoint
     explains current *levels*. The dashboard generates the live "what changed and
@@ -192,4 +200,23 @@ def risk_explain(account_id: str):
     if snapshot is None:
         raise RiskApiError(404, "not_found",
                            "No metrics computed yet for this account.")
-    return explain_snapshot(snapshot)
+
+    facts = explain_snapshot(snapshot)
+    facts.setdefault("mode", "rule")
+    if mode == "llm":
+        narrative = generate_llm_narrative(facts)
+        if narrative is not None:
+            return narrative
+        # Fall back to deterministic text; signal why the request degraded.
+        facts["llm_unavailable"] = True
+    return facts
+
+
+@app.get("/risk/explain/capabilities")
+def risk_explain_capabilities():
+    """Advertise whether the optional grounded LLM mode is available.
+
+    Lets the dashboard show/hide the "AI explanation" toggle without exposing any
+    secrets. Reports only a boolean; never the API key or provider details.
+    """
+    return {"llm_enabled": llm_enabled()}

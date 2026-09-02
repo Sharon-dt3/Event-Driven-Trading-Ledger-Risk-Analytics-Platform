@@ -90,4 +90,15 @@ export const api = {
     if (method) params.set('method', method);
     return request(`/risk/var?${params.toString()}`);
   },
+
+  // Explainability: deterministic by default; pass mode='llm' for the optional
+  // grounded AI rewrite (server falls back to rule-based text if unavailable).
+  riskExplain: (accountId, mode) => {
+    const params = new URLSearchParams({ account_id: accountId });
+    if (mode) params.set('mode', mode);
+    return request(`/risk/explain?${params.toString()}`);
+  },
+
+  // Whether the optional grounded LLM explanation mode is enabled server-side.
+  riskExplainCapabilities: () => request(`/risk/explain/capabilities`),
 };

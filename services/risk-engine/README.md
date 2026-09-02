@@ -69,6 +69,30 @@ VaR is **parametric only** (~95% one-sided, z = 1.65); **historical VaR is out o
 scope**. The `RiskComputed.v1` contract requires all fields
 (`additionalProperties:false`), so they are always present.
 
+### Explainability layer (plain-language + optional AI)
+
+`GET /risk/explain?account_id=...` turns the latest snapshot into plain-language
+analysis for users without finance expertise (headline, per-metric explanations,
+and caveats). It is **additive** and does not alter the frozen contracts.
+
+- **Default (`mode` omitted or `mode=rule`)** — deterministic, rule-based text
+  (module `app/explain.py`). No dependencies, fully unit-tested.
+- **Optional `mode=llm`** — a **grounded** LLM rewrite (module `app/llm_explain.py`)
+  that makes the same facts friendlier/conversational. The model is given only the
+  already-computed numbers and facts and instructed to never invent figures or give
+  advice; only prose is overlaid onto the authoritative deterministic structure.
+  It is **off by default**, uses **no extra dependencies** (stdlib `urllib` against
+  an OpenAI-compatible endpoint), and **falls back** to rule-based text on any
+  error, so the endpoint never breaks. The response `mode` field reports what was
+  actually produced (`rule` or `llm`).
+- `GET /risk/explain/capabilities` → `{ "llm_enabled": bool }` lets the dashboard
+  show its "AI explanation" toggle only when the server has the mode enabled.
+
+LLM env vars (all optional): `RISK_LLM_ENABLED` (default `false`),
+`RISK_LLM_API_KEY` (or `OPENAI_API_KEY`), `RISK_LLM_BASE_URL`
+(default `https://api.openai.com/v1`), `RISK_LLM_MODEL` (default `gpt-4o-mini`),
+`RISK_LLM_TIMEOUT_MS` (default `8000`).
+
 **Dashboard read API:** the compute+publish path above is also exposed over REST
 (`GET /risk/summary`, `GET /risk/var`) by serving the last-published snapshot, so
 the dashboard can fetch current state on load and then track the live stream.
