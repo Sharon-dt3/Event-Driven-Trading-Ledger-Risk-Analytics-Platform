@@ -4,6 +4,7 @@ import { useAsync } from '../hooks/useAsync';
 import { useStreamData } from '../stream/StreamContext';
 import { StateBlock } from '../components/StateBlock';
 import { fmtMoney, fmtNum, fmtPct, fmtTime } from '../format';
+import { buildRiskNarrative } from '../explain';
 
 function Metric({ label, value, sub }) {
   return (
@@ -15,9 +16,56 @@ function Metric({ label, value, sub }) {
   );
 }
 
+function Explainability({ narrative, isLive }) {
+  if (!narrative) return null;
+  return (
+    <div className="panel explain">
+      <div className="section-head">
+        <h3>What this means</h3>
+        <span className="muted">{isLive ? 'live analysis' : 'analysis'}</span>
+      </div>
+      <p className="explain__headline">{narrative.headline}</p>
+      <p className="muted">{narrative.summary}</p>
+
+      {narrative.changes.length > 0 && (
+        <div className="explain__changes">
+          <h4>What just changed &amp; why</h4>
+          <ul>
+            {narrative.changes.map((c, i) => (
+              <li key={`chg-${c.key}-${i}`} className={`explain__change explain__change--${c.direction}`}>
+                {c.plain}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="explain__metrics">
+        <h4>Your numbers, explained</h4>
+        <dl>
+          {narrative.metrics.map((m) => (
+            <div key={`m-${m.key}`} className="explain__metric">
+              <dt>{m.label}</dt>
+              <dd>{m.plain}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+
+      {narrative.notes.length > 0 && (
+        <ul className="explain__notes muted">
+          {narrative.notes.map((n, i) => (
+            <li key={`note-${i}`}>{n}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function Risk() {
   const { account } = useAuth();
-  const { risk: liveRisk } = useStreamData();
+  const { risk: liveRisk, riskLog } = useStreamData();
 
   const summary = useAsync(() => api.riskSummary(account), [account]);
   const varDetail = useAsync(() => api.riskVar(account, 'parametric'), [account]);
@@ -26,6 +74,12 @@ export function Risk() {
   // to the REST summary (fetch-on-load, coherent with the last published event).
   const live = liveRisk && liveRisk.account_id === account ? liveRisk : null;
   const s = live || summary.data;
+
+  // For the live "what changed and why" narrative, diff the two most recent
+  // risk.updates events for this account (riskLog is most-recent-first).
+  const accountLog = (riskLog || []).filter((r) => r.account_id === account);
+  const previous = live && accountLog.length > 1 ? accountLog[1] : null;
+  const narrative = s ? buildRiskNarrative(s, previous) : null;
 
   const refresh = () => {
     summary.run().catch(() => {});
@@ -67,6 +121,8 @@ export function Risk() {
               <Metric label="Sharpe" value={fmtNum(s.sharpe, 2)} />
             </div>
             <p className="muted">Computed at {fmtTime(s.computed_at)}</p>
+
+            <Explainability narrative={narrative} isLive={!!live} />
           </>
         )}
 

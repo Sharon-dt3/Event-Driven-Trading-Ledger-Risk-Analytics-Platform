@@ -138,6 +138,31 @@ h3 { margin-top: 1.75rem; color: var(--muted); font-weight: 600; }
 .pill { padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.78rem; }
 .pill--posted, .pill--accepted { background: rgba(46, 204, 113, 0.15); color: var(--ok); }
 .pill--rejected { background: rgba(255, 107, 107, 0.15); color: var(--err); }
+.pill--buy { background: rgba(46, 204, 113, 0.15); color: var(--ok); }
+.pill--sell { background: rgba(255, 107, 107, 0.15); color: var(--err); }
+
+/* Explainability panel */
+.explain { margin-top: 1.25rem; }
+.explain__headline { font-size: 1.1rem; font-weight: 700; margin: 0.25rem 0 0.35rem; }
+.explain h4 { margin: 1rem 0 0.5rem; color: var(--muted); font-size: 0.9rem; font-weight: 600; }
+.explain__changes ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.explain__change {
+  padding: 0.6rem 0.8rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: var(--panel-2);
+  border-left: 3px solid var(--accent);
+}
+.explain__change--up { border-left-color: var(--ok); }
+.explain__change--down { border-left-color: var(--err); }
+.explain__metrics dl { margin: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.explain__metric { display: grid; grid-template-columns: 130px 1fr; gap: 0.75rem; align-items: start; }
+.explain__metric dt { color: var(--accent); font-weight: 600; font-size: 0.9rem; }
+.explain__metric dd { margin: 0; font-size: 0.9rem; line-height: 1.4; }
+.explain__notes { margin: 1rem 0 0; padding-left: 1.1rem; font-size: 0.82rem; display: flex; flex-direction: column; gap: 0.3rem; }
+@media (max-width: 620px) {
+  .explain__metric { grid-template-columns: 1fr; gap: 0.15rem; }
+}
 
 /* Login */
 .login { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem; }

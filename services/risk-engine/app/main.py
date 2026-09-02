@@ -34,6 +34,7 @@ from .correlation import (
     new_correlation_id,
     set_correlation_id,
 )
+from .explain import explain_snapshot
 from .logging_config import configure_logging
 from .store import RiskStore
 
@@ -168,3 +169,27 @@ def risk_var(account_id: str, method: Optional[str] = None):
         "horizon_days": VAR_HORIZON_DAYS,
         "computed_at": snapshot["computed_at"],
     }
+
+
+@app.get("/risk/explain")
+def risk_explain(account_id: str):
+    """Plain-language explainability layer over the latest risk snapshot.
+
+    Turns portfolio value, P&L, volatility, VaR and Sharpe into human-readable
+    analysis for users without financial expertise. Additive to the frozen
+    contracts (does not alter RiskSummary/RiskComputed). Returns 404 (contract
+    ``Error`` shape) when no metrics have been computed for the account yet.
+
+    Note: the store keeps only the latest snapshot per account, so this endpoint
+    explains current *levels*. The dashboard generates the live "what changed and
+    why" narrative by diffing consecutive ``risk.updates`` events client-side.
+    """
+    store = _open_store()
+    try:
+        snapshot = store.get_risk_snapshot(account_id)
+    finally:
+        store.close()
+    if snapshot is None:
+        raise RiskApiError(404, "not_found",
+                           "No metrics computed yet for this account.")
+    return explain_snapshot(snapshot)
