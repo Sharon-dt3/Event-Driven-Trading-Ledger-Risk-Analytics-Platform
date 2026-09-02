@@ -4,6 +4,7 @@ FROM golang:1.22-alpine AS build
 WORKDIR /app
 COPY common-go/ ./common-go/
 COPY gateway/go.mod ./gateway/go.mod
+COPY gateway/go.sum ./gateway/go.sum
 WORKDIR /app/gateway
 RUN go mod download
 COPY gateway/ /app/gateway/

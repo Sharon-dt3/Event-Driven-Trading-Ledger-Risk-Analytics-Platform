@@ -68,6 +68,16 @@ func (s *statusRecorder) WriteHeader(code int) {
 	s.ResponseWriter.WriteHeader(code)
 }
 
+// Flush forwards to the underlying ResponseWriter when it supports flushing, so
+// long-lived streaming responses (e.g. Server-Sent Events) work even though the
+// handler is wrapped by the logging middleware. Without this, the wrapped
+// writer would hide the http.Flusher the SSE handler relies on.
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // RequestLogger emits a structured log line per request, including the
 // correlation id.
 func RequestLogger(logger *slog.Logger, next http.Handler) http.Handler {

@@ -12,7 +12,7 @@ import (
 )
 
 func testRouter() http.Handler {
-	return newRouter(slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	return newRouter(slog.New(slog.NewJSONHandler(io.Discard, nil)), newBroker())
 }
 
 func TestHealthEndpoint(t *testing.T) {

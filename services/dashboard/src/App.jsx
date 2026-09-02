@@ -1,23 +1,39 @@
-const SERVICES = [
-  { name: 'Ledger Core', url: 'http://localhost:8082/actuator/health' },
-  { name: 'Risk Engine', url: 'http://localhost:8083/health' },
-  { name: 'Market Data', url: 'http://localhost:8081/health' },
-  { name: 'Gateway', url: 'http://localhost:8084/health' },
-];
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider } from './auth/AuthContext';
+import { StreamProvider } from './stream/StreamContext';
+import { ProtectedRoute } from './components/ProtectedRoute';
+import { Layout } from './components/Layout';
+import { Login } from './screens/Login';
+import { Ticker } from './screens/Ticker';
+import { Positions } from './screens/Positions';
+import { Trades } from './screens/Trades';
+import { Risk } from './screens/Risk';
+import { Audit } from './screens/Audit';
 
 export default function App() {
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem', maxWidth: 720, margin: '0 auto' }}>
-      <h1>TradePulse Dashboard</h1>
-      <p>Phase 1 skeleton — the live trading UI is delivered in later phases.</p>
-      <h2>Backend services</h2>
-      <ul>
-        {SERVICES.map((s) => (
-          <li key={s.name}>
-            {s.name}: <a href={s.url} target="_blank" rel="noreferrer">{s.url}</a>
-          </li>
-        ))}
-      </ul>
-    </main>
+    <AuthProvider>
+      <StreamProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route
+              element={
+                <ProtectedRoute>
+                  <Layout />
+                </ProtectedRoute>
+              }
+            >
+              <Route path="/" element={<Ticker />} />
+              <Route path="/positions" element={<Positions />} />
+              <Route path="/trades" element={<Trades />} />
+              <Route path="/risk" element={<Risk />} />
+              <Route path="/audit" element={<Audit />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </StreamProvider>
+    </AuthProvider>
   );
 }
