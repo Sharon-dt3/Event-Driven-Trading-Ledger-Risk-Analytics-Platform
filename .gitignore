@@ -33,3 +33,7 @@ services/dashboard/dist/
 # Logs
 logs/
 *.log
+
+# Redis persistence artifacts (from local/live-Redis test runs)
+dump.rdb
+*.rdb
