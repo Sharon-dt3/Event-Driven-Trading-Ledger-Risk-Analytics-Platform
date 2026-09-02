@@ -7,10 +7,28 @@
 
 const LEDGER_BASE = '/ledger';
 const TOKEN_KEY = 'tp_token';
+const USER_KEY = 'tp_user';
 
 function authHeaders() {
   const token = localStorage.getItem(TOKEN_KEY);
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+// A stored JWT can be expired or otherwise rejected by ledger-core (HTTP 401),
+// which previously left the app "logged in" while every authenticated call
+// failed (Trades/Positions/Risk/Audit all 401). Recover automatically: drop the
+// stale credentials and send the user to the login screen so they can re-auth.
+// Guarded so it only fires in a browser and never loops on the login request.
+function handleUnauthorized() {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  } catch {
+    // localStorage may be unavailable (e.g. privacy mode); ignore.
+  }
+  if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+    window.location.assign('/login');
+  }
 }
 
 async function request(path, { method = 'GET', body, auth = true, okStatuses = [] } = {}) {
@@ -31,6 +49,12 @@ async function request(path, { method = 'GET', body, auth = true, okStatuses = [
     } catch {
       data = text;
     }
+  }
+
+  // Authenticated request rejected by the token check: clear + redirect to login
+  // (unless the caller explicitly tolerates this status).
+  if (res.status === 401 && auth && !okStatuses.includes(401)) {
+    handleUnauthorized();
   }
 
   if (!res.ok && !okStatuses.includes(res.status)) {
