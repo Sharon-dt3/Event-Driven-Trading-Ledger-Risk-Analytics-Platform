@@ -2,8 +2,10 @@ COMPOSE = docker compose -f infra/docker-compose.yml
 COMPOSE_DEPLOY = docker compose -f infra/docker-compose.deploy.yml
 COMPOSE_PUBLIC = docker compose -f infra/docker-compose.public.yml
 COMPOSE_TUNNEL = docker compose -f infra/docker-compose.tunnel.yml
+COMPOSE_TUNNEL_NAMED = docker compose -f infra/docker-compose.named-tunnel.yml
+COMPOSE_NGROK = docker compose -f infra/docker-compose.ngrok.yml
 
-.PHONY: up down logs ps build restart deploy deploy-down deploy-logs deploy-ps deploy-public deploy-public-down deploy-public-logs deploy-public-ps tunnel tunnel-url tunnel-down tunnel-logs tunnel-ps verify-native verify-native-strict clean
+.PHONY: up down logs ps build restart deploy deploy-down deploy-logs deploy-ps deploy-public deploy-public-down deploy-public-logs deploy-public-ps tunnel tunnel-url tunnel-down tunnel-logs tunnel-ps tunnel-named tunnel-named-down tunnel-named-logs tunnel-named-ps ngrok ngrok-down ngrok-logs ngrok-ps verify-native verify-native-strict clean
 
 up:
 	$(COMPOSE) up --build -d
@@ -80,6 +82,46 @@ tunnel-logs:
 
 tunnel-ps:
 	$(COMPOSE_TUNNEL) ps
+
+# ---- PERMANENT public URL via a Cloudflare NAMED Tunnel -------------------
+# Fixed hostname you own (e.g. https://tradepulse.yourdomain.com) that never
+# changes or expires — unlike `make tunnel` (quick tunnel). Requires a free
+# Cloudflare account, a domain on Cloudflare, and TUNNEL_TOKEN in infra/.env.
+# See DEPLOY.md "Permanent URL (Named Cloudflare Tunnel)" for the 1-time setup.
+#   make tunnel-named        # start the stack + named tunnel
+#   make tunnel-named-logs   # watch for "Registered tunnel connection"
+tunnel-named:
+	$(COMPOSE_TUNNEL_NAMED) up --build -d
+	@echo "Named tunnel starting. Open your fixed https://<your-hostname>/ once cloudflared connects (make tunnel-named-logs)."
+
+tunnel-named-down:
+	$(COMPOSE_TUNNEL_NAMED) down -v
+
+tunnel-named-logs:
+	$(COMPOSE_TUNNEL_NAMED) logs -f
+
+tunnel-named-ps:
+	$(COMPOSE_TUNNEL_NAMED) ps
+
+# ---- PERMANENT FREE public URL via ngrok static domain --------------------
+# Fixed https://<your-name>.ngrok-free.app URL that never changes — FREE and
+# needs NO domain of your own. Requires NGROK_AUTHTOKEN + NGROK_DOMAIN in
+# infra/.env (create a free ngrok account, then claim one static domain).
+# See DEPLOY.md "Permanent free URL (ngrok static domain)" for the 1-time setup.
+#   make ngrok        # start the stack + ngrok on your fixed URL
+#   make ngrok-logs   # watch for "started tunnel"
+ngrok:
+	$(COMPOSE_NGROK) up --build -d
+	@echo "ngrok starting. Open your fixed https://$${NGROK_DOMAIN}/ once the agent connects (make ngrok-logs)."
+
+ngrok-down:
+	$(COMPOSE_NGROK) down -v
+
+ngrok-logs:
+	$(COMPOSE_NGROK) logs -f
+
+ngrok-ps:
+	$(COMPOSE_NGROK) ps
 
 # Verify each service builds and tests WITHOUT Docker (native toolchains).
 # Useful in restricted/nested environments where the Docker daemon cannot

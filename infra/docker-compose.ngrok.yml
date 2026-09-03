@@ -1,0 +1,223 @@
+name: tradepulse
+
+# ---------------------------------------------------------------------------
+# PERMANENT public URL via ngrok — FREE, no domain of your own required.
+#
+# ngrok's free tier includes ONE static domain (e.g. your-name.ngrok-free.app)
+# that is yours permanently and does NOT change between restarts — unlike the
+# Cloudflare quick tunnel (infra/docker-compose.tunnel.yml) whose random
+# trycloudflare.com hostname expires/rotates. The ngrok agent runs from your
+# laptop behind NAT (outbound-only: no open ports, no public IP, no firewall
+# changes) and proxies your fixed URL to the internal dashboard.
+#
+# ONE-TIME SETUP (see DEPLOY.md "Permanent free URL (ngrok static domain)"):
+#   1. Create a free ngrok account: https://dashboard.ngrok.com/signup
+#   2. Copy your authtoken: https://dashboard.ngrok.com/get-started/your-authtoken
+#   3. Claim your free static domain (Domains -> Create Domain):
+#        https://dashboard.ngrok.com/domains
+#      It looks like  your-name.ngrok-free.app
+#   4. Put both in infra/.env:
+#        NGROK_AUTHTOKEN=2ab...           (from step 2)
+#        NGROK_DOMAIN=your-name.ngrok-free.app   (from step 3)
+#      and strong app secrets (see SECURITY note below).
+#
+# RUN:
+#   make ngrok            # start the full stack + ngrok on your fixed URL
+#   make ngrok-logs       # watch the agent connect ("started tunnel")
+#   # then open https://<NGROK_DOMAIN>/  — permanent, free, nothing to renew.
+#
+# SECURITY: the URL is world-reachable, so set strong app credentials in
+# infra/.env before sharing it:
+#   LEDGER_JWT_SECRET, LEDGER_AUTH_ADMIN_PASSWORD, LEDGER_AUTH_TRADER_PASSWORD,
+#   LEDGER_AUTH_VIEWER_PASSWORD, LEDGER_AUTH_COMPLIANCE_PASSWORD, POSTGRES_PASSWORD
+#
+# NOTE (free tier): first-time visitors see a brief ngrok interstitial page,
+# and there are soft bandwidth/rate limits — fine for demos and sharing.
+# ---------------------------------------------------------------------------
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tradepulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradepulse}
+      POSTGRES_DB: ${POSTGRES_DB:-tradepulse}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tradepulse} -d ${POSTGRES_DB:-tradepulse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  market-data:
+    build:
+      context: ../services
+      dockerfile: market-data/Dockerfile
+    environment:
+      PORT: "8081"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REDIS_ADDR: "redis:6379"
+      MARKET_DATA_STREAM: ${MARKET_DATA_STREAM:-market.ticks}
+      MARKET_DATA_SYMBOLS: ${MARKET_DATA_SYMBOLS:-AAPL,MSFT,GOOG}
+      MARKET_DATA_TICK_INTERVAL_MS: ${MARKET_DATA_TICK_INTERVAL_MS:-1000}
+      MARKET_DATA_SOURCE: ${MARKET_DATA_SOURCE:-synthetic}
+    expose:
+      - "8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  ledger-core:
+    build:
+      context: ../services/ledger-core
+    environment:
+      SERVER_PORT: "8082"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/${POSTGRES_DB:-tradepulse}"
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-tradepulse}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-tradepulse}
+      REDIS_URL: "redis://redis:6379/0"
+      LEDGER_STREAM_ENABLED: ${LEDGER_STREAM_ENABLED:-true}
+      LEDGER_STREAM_NAME: ${LEDGER_STREAM_NAME:-ledger.updates}
+      # Security overrides — set these in infra/.env before sharing the URL.
+      LEDGER_JWT_SECRET: ${LEDGER_JWT_SECRET:-change-me-tradepulse-ledger-dev-secret-please-rotate}
+      LEDGER_AUTH_ADMIN_PASSWORD: ${LEDGER_AUTH_ADMIN_PASSWORD:-admin-pw}
+      LEDGER_AUTH_TRADER_PASSWORD: ${LEDGER_AUTH_TRADER_PASSWORD:-trader-pw}
+      LEDGER_AUTH_VIEWER_PASSWORD: ${LEDGER_AUTH_VIEWER_PASSWORD:-viewer-pw}
+      LEDGER_AUTH_COMPLIANCE_PASSWORD: ${LEDGER_AUTH_COMPLIANCE_PASSWORD:-compliance-pw}
+    expose:
+      - "8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8082'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    restart: unless-stopped
+
+  risk-engine:
+    build:
+      context: ../services/risk-engine
+    environment:
+      PORT: "8083"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REDIS_URL: "redis://redis:6379/0"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-tradepulse}:${POSTGRES_PASSWORD:-tradepulse}@postgres:5432/${POSTGRES_DB:-tradepulse}"
+      RISK_DB_PATH: ${RISK_DB_PATH:-/app/data/risk_state.db}
+    expose:
+      - "8083"
+    volumes:
+      - risk_state:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8083/health').status==200 else sys.exit(1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  risk-worker:
+    build:
+      context: ../services/risk-engine
+    command: ["python", "-m", "app.worker"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REDIS_URL: "redis://redis:6379/0"
+      RISK_DB_PATH: ${RISK_DB_PATH:-/app/data/risk_state.db}
+    volumes:
+      - risk_state:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      ledger-core:
+        condition: service_started
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ../services
+      dockerfile: gateway/Dockerfile
+    environment:
+      PORT: "8084"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REDIS_ADDR: "redis:6379"
+    expose:
+      - "8084"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8084/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Internal only: reached by ngrok, not published on the host.
+  dashboard:
+    build:
+      context: ../services/dashboard
+    expose:
+      - "3000"
+    depends_on:
+      ledger-core:
+        condition: service_started
+      risk-engine:
+        condition: service_started
+      gateway:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ngrok agent: authenticates with NGROK_AUTHTOKEN and serves your reserved
+  # free static domain (NGROK_DOMAIN), proxying it to the internal dashboard.
+  # Outbound-only; the fixed URL is https://${NGROK_DOMAIN}/.
+  ngrok:
+    image: ngrok/ngrok:latest
+    command:
+      - "http"
+      - "--url=${NGROK_DOMAIN:?Set NGROK_DOMAIN in infra/.env — claim a free static domain at https://dashboard.ngrok.com/domains}"
+      - "dashboard:3000"
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:?Set NGROK_AUTHTOKEN in infra/.env — get it at https://dashboard.ngrok.com/get-started/your-authtoken}
+    depends_on:
+      dashboard:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  risk_state:

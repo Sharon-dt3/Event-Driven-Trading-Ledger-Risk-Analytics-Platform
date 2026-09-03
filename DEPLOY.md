@@ -226,4 +226,112 @@ internet can open it. The live SSE feed (`/stream`) works through the tunnel.
   `--url` mode. Ask and I can wire that up.
 - For a classic server deployment with your own domain + Let's Encrypt, use the
   Caddy path above (`make deploy-public`).
+
+## Permanent URL (Named Cloudflare Tunnel)
+
+The quick tunnel above is demo-only: its `https://<random>.trycloudflare.com`
+hostname is temporary and changes/expires whenever `cloudflared` restarts, so
+you have to keep re-sharing it. For a **permanent URL that always works for
+anyone and never breaks**, use a Cloudflare **Named Tunnel**. It still runs from
+your laptop behind NAT (outbound-only, no open ports, no public IP), but the
+hostname is one you own and it is stable across restarts, reboots, and sleep.
+
+### One-time setup (~10 minutes)
+
+1. Create a free **Cloudflare account** and add a domain (point the domain's
+   nameservers at Cloudflare). Any domain works — one you own, a cheap new one,
+   or one bought through Cloudflare Registrar.
+2. Go to **Cloudflare Zero Trust → Networks → Tunnels → Create a tunnel**,
+   choose **Cloudflared**, name it (e.g. `tradepulse`), and copy the **token**
+   it shows (a long `eyJ...` string).
+3. On that tunnel, add a **Public Hostname**:
+   - **Subdomain/Domain:** e.g. `tradepulse.yourdomain.com`
+   - **Service:** `HTTP` → `dashboard:3000`
+   (The dashboard's nginx already routes `/ledger`, `/risk`, and `/stream`.)
+4. Create `infra/.env` and set the token plus strong app secrets:
+   ```bash
+   cd infra && cp ../.env.example .env
+   # then set:
+   #   TUNNEL_TOKEN=eyJ...                                  (from step 2)
+   #   LEDGER_JWT_SECRET=$(openssl rand -base64 48)
+   #   LEDGER_AUTH_ADMIN_PASSWORD=...
+   #   LEDGER_AUTH_TRADER_PASSWORD=...
+   #   LEDGER_AUTH_VIEWER_PASSWORD=...
+   #   LEDGER_AUTH_COMPLIANCE_PASSWORD=...
+   #   POSTGRES_PASSWORD=$(openssl rand -base64 24)
+   cd ..
+   ```
+
+### Run it
+
+```bash
+make tunnel-named          # builds + starts the full stack and the named tunnel
+make tunnel-named-logs     # wait for "Registered tunnel connection" in cloudflared
+make tunnel-named-down     # stop everything
+```
+
+Then open your **fixed** URL — e.g. `https://tradepulse.yourdomain.com/`. It is
+the same link every time; there is nothing to renew. Share it with anyone.
+
+### Notes
+
+- Uses `infra/docker-compose.named-tunnel.yml`. The public-hostname → service
+  mapping lives in the Cloudflare dashboard, so no `--url` flag is used.
+- Because the tunnel is token-authenticated and Cloudflare-managed, the URL
+  survives `cloudflared` restarts (the failure mode you hit with the quick
+  tunnel cannot happen here).
+- If you'd rather host on a VM with your own domain + Let's Encrypt instead of a
+  tunnel, use the Caddy path (`make deploy-public`).
+
+## Permanent free URL (ngrok static domain)
+
+Want a permanent URL that always works for anyone, costs **nothing**, and needs
+**no domain of your own**? Use ngrok's free **static domain**. The free tier
+includes one reserved domain (e.g. `your-name.ngrok-free.app`) that is yours
+permanently and does not change between restarts — unlike the Cloudflare quick
+tunnel (`make tunnel`). The ngrok agent runs from your laptop behind NAT
+(outbound-only: no open ports, no public IP, no firewall changes).
+
+### One-time setup (~5 minutes, $0)
+
+1. Create a free ngrok account: https://dashboard.ngrok.com/signup
+2. Copy your **authtoken**:
+   https://dashboard.ngrok.com/get-started/your-authtoken
+3. Claim your free **static domain** (Domains → Create Domain):
+   https://dashboard.ngrok.com/domains — it looks like
+   `your-name.ngrok-free.app`.
+4. Create `infra/.env` and set the token, domain, and strong app secrets:
+   ```bash
+   cd infra && cp ../.env.example .env
+   # then set:
+   #   NGROK_AUTHTOKEN=2ab...                       (from step 2)
+   #   NGROK_DOMAIN=your-name.ngrok-free.app        (from step 3)
+   #   LEDGER_JWT_SECRET=$(openssl rand -base64 48)
+   #   LEDGER_AUTH_ADMIN_PASSWORD=...
+   #   LEDGER_AUTH_TRADER_PASSWORD=...
+   #   LEDGER_AUTH_VIEWER_PASSWORD=...
+   #   LEDGER_AUTH_COMPLIANCE_PASSWORD=...
+   #   POSTGRES_PASSWORD=$(openssl rand -base64 24)
+   cd ..
+   ```
+
+### Run it
+
+```bash
+make ngrok          # builds + starts the full stack and the ngrok agent
+make ngrok-logs     # wait for "started tunnel" in the ngrok logs
+make ngrok-down     # stop everything
+```
+
+Then open your **fixed** URL — e.g. `https://your-name.ngrok-free.app/`. It is
+the same link every time; there is nothing to renew. Share it with anyone.
+
+### Notes
+
+- Uses `infra/docker-compose.ngrok.yml`; ngrok proxies your static domain to the
+  internal `dashboard:3000` (which already routes `/ledger`, `/risk`, `/stream`).
+- Free-tier caveats: first-time visitors see a brief ngrok interstitial page,
+  and there are soft bandwidth/rate limits — fine for demos and sharing. These
+  are removed on ngrok paid plans, but you do not need to pay.
+- The live SSE feed (`/stream`) works through ngrok without extra config.
 ```
