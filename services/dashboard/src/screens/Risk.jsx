@@ -116,6 +116,20 @@ export function Risk() {
   const live = liveRisk && liveRisk.account_id === account ? liveRisk : null;
   const s = live || summary.data;
 
+  // VaR detail prefers the live SSE snapshot so its VaR value and timestamp
+  // always match the summary card above. The live risk.updates event doesn't
+  // carry confidence/horizon, so those come from the REST detail when present,
+  // else the documented parametric defaults (95% confidence, 1-day horizon).
+  const varView = live
+    ? {
+        var: live.var,
+        var_method: live.var_method,
+        confidence: varDetail.data?.confidence ?? 0.95,
+        horizon_days: varDetail.data?.horizon_days ?? 1,
+        computed_at: live.computed_at,
+      }
+    : varDetail.data;
+
   // For the live "what changed and why" narrative, diff the two most recent
   // risk.updates events for this account (riskLog is most-recent-first).
   const accountLog = (riskLog || []).filter((r) => r.account_id === account);
@@ -215,33 +229,33 @@ export function Risk() {
 
         <h3>VaR detail</h3>
         <StateBlock
-          loading={varDetail.loading}
+          loading={varDetail.loading && !live}
           error={varDetail.error?.status && varDetail.error.status !== 404 ? varDetail.error : null}
-          empty={!varDetail.data}
+          empty={!varView}
           emptyText="No VaR detail yet."
         >
-          {varDetail.data && (
+          {varView && (
             <table className="table table--kv">
               <tbody>
                 <tr>
                   <th>VaR</th>
-                  <td>{fmtMoney(varDetail.data.var)}</td>
+                  <td>{fmtMoney(varView.var)}</td>
                 </tr>
                 <tr>
                   <th>Method</th>
-                  <td>{varDetail.data.var_method}</td>
+                  <td>{varView.var_method}</td>
                 </tr>
                 <tr>
                   <th>Confidence</th>
-                  <td>{fmtPct(varDetail.data.confidence)}</td>
+                  <td>{fmtPct(varView.confidence)}</td>
                 </tr>
                 <tr>
                   <th>Horizon</th>
-                  <td>{varDetail.data.horizon_days} day(s)</td>
+                  <td>{varView.horizon_days} day(s)</td>
                 </tr>
                 <tr>
                   <th>Computed at</th>
-                  <td>{fmtTime(varDetail.data.computed_at)}</td>
+                  <td>{fmtTime(varView.computed_at)}</td>
                 </tr>
               </tbody>
             </table>
