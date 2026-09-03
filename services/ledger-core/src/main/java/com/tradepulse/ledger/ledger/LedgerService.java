@@ -2,6 +2,7 @@ package com.tradepulse.ledger.ledger;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tradepulse.ledger.domain.AdminCreditResult;
 import com.tradepulse.ledger.domain.ComplianceRules;
 import com.tradepulse.ledger.domain.TradeRequestDto;
 import com.tradepulse.ledger.domain.TradeResultDto;
@@ -45,6 +46,43 @@ public class LedgerService {
 
     public boolean accountExists(String accountId) {
         return repo.getCash(accountId) != null;
+    }
+
+    /**
+     * Admin-only capability: fund an account with additional cash. Unlike a
+     * trade, this is not a market action — it is an administrative top-up that
+     * only the {@code admin} role may perform (enforced in SecurityConfig).
+     *
+     * <p>The credit is still recorded with finance-grade correctness: a balanced
+     * double-entry journal (debit the account cash, credit an external funding
+     * source) plus an immutable audit row, all in one transaction. It does not
+     * emit a stream event, so it never interferes with the risk pipeline; the
+     * new balance is visible immediately via GET /balances.
+     */
+    @Transactional
+    public AdminCreditResult creditAccount(String accountId, BigDecimal amount, String reason) {
+        if (amount == null || amount.signum() <= 0) {
+            throw new IllegalArgumentException("amount must be > 0");
+        }
+        BigDecimal cash = repo.getCash(accountId);
+        if (cash == null) {
+            throw new IllegalStateException("unknown account_id");
+        }
+
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        UUID sourceEventId = UUID.randomUUID();
+        UUID journalEntryId = UUID.randomUUID();
+
+        // Balanced double-entry: cash increases, so debit the account cash and
+        // credit an external "funding" source (debits == credits).
+        repo.insertJournalEntry(journalEntryId, sourceEventId, accountId, now);
+        repo.insertJournalLine(journalEntryId, accountId, amount, BigDecimal.ZERO);
+        repo.insertJournalLine(journalEntryId, "funding", BigDecimal.ZERO, amount);
+        repo.updateCash(accountId, amount);
+        repo.insertAudit(UUID.randomUUID(), accountId, sourceEventId, "ADMIN_CREDIT",
+                "accepted", reason, now);
+
+        return new AdminCreditResult(accountId, amount, cash.add(amount), "credited");
     }
 
     @Transactional

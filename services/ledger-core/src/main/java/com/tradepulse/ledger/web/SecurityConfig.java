@@ -54,6 +54,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/health", "/", "/actuator/**", "/auth/login").permitAll()
                         .requestMatchers("/audit").hasAnyRole("compliance", "admin")
+                        .requestMatchers("/admin/**").hasRole("admin")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth -> oauth
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(converter)));
