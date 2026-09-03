@@ -1,7 +1,8 @@
 COMPOSE = docker compose -f infra/docker-compose.yml
 COMPOSE_DEPLOY = docker compose -f infra/docker-compose.deploy.yml
+COMPOSE_PUBLIC = docker compose -f infra/docker-compose.public.yml
 
-.PHONY: up down logs ps build restart deploy deploy-down deploy-logs deploy-ps verify-native verify-native-strict clean
+.PHONY: up down logs ps build restart deploy deploy-down deploy-logs deploy-ps deploy-public deploy-public-down deploy-public-logs deploy-public-ps verify-native verify-native-strict clean
 
 up:
 	$(COMPOSE) up --build -d
@@ -38,6 +39,23 @@ deploy-logs:
 
 deploy-ps:
 	$(COMPOSE_DEPLOY) ps
+
+# ---- Public deployment (HTTPS via Caddy, internet-reachable) --------------
+# Requires infra/.env with DOMAIN, LEDGER_JWT_SECRET, POSTGRES_PASSWORD and the
+# LEDGER_AUTH_*_PASSWORD values set (compose refuses to start otherwise).
+#   make deploy-public          # serve https://$DOMAIN/ (ports 80+443)
+deploy-public:
+	$(COMPOSE_PUBLIC) up --build -d
+	@echo "TradePulse public stack is deploying. Once healthy, open https://$${DOMAIN}/"
+
+deploy-public-down:
+	$(COMPOSE_PUBLIC) down -v
+
+deploy-public-logs:
+	$(COMPOSE_PUBLIC) logs -f
+
+deploy-public-ps:
+	$(COMPOSE_PUBLIC) ps
 
 # Verify each service builds and tests WITHOUT Docker (native toolchains).
 # Useful in restricted/nested environments where the Docker daemon cannot

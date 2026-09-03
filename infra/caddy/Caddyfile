@@ -1,0 +1,20 @@
+# Caddy config for the public TradePulse deployment.
+#
+# {$DOMAIN} is your public hostname (e.g. tradepulse.example.com). Caddy will
+# automatically obtain and renew a Let's Encrypt certificate for it, provided:
+#   - DNS for {$DOMAIN} points at this host's public IP, and
+#   - ports 80 and 443 are reachable from the internet.
+#
+# All requests are proxied to the dashboard container, whose nginx already
+# routes /ledger -> ledger-core, /risk -> risk-engine, and /stream -> gateway.
+# Caddy detects text/event-stream and flushes immediately, so SSE stays live.
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	reverse_proxy dashboard:3000 {
+		# Preserve the original host and client IP for backend logging.
+		header_up Host {host}
+		header_up X-Forwarded-For {remote_host}
+	}
+}

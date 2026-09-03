@@ -1,23 +1,30 @@
 name: tradepulse
 
 # ---------------------------------------------------------------------------
-# Single-URL production deployment.
+# PUBLIC deployment (HTTPS, internet-reachable).
 #
-# Unlike infra/docker-compose.yml (which publishes every service on its own
-# host port for local development), this file publishes ONLY the dashboard.
-# The dashboard container runs nginx and reverse-proxies the backend APIs:
+# Difference vs docker-compose.deploy.yml:
+#   - A Caddy reverse proxy is the ONLY published service (ports 80 + 443) and
+#     terminates TLS (automatic Let's Encrypt certificate for ${DOMAIN}).
+#   - The dashboard is NOT published on the host; Caddy reaches it internally.
+#   - Strong secrets are REQUIRED via ${VAR:?...}. Compose refuses to start if
+#     they are missing, so you cannot accidentally expose the app to the
+#     internet with the in-repo demo credentials or the dev JWT secret.
 #
-#     http://<host>:${PUBLIC_PORT:-80}/            -> React SPA
-#     http://<host>:${PUBLIC_PORT:-80}/ledger/...  -> ledger-core:8082
-#     http://<host>:${PUBLIC_PORT:-80}/risk/...    -> risk-engine:8083
-#     http://<host>:${PUBLIC_PORT:-80}/stream      -> gateway:8084 (SSE)
-#
-# Every other service is reachable only on the internal compose network, so the
-# whole platform is accessed through the one public URL.
+# Required environment (put these in infra/.env):
+#   DOMAIN                        public hostname, e.g. tradepulse.example.com
+#   LEDGER_JWT_SECRET             long random string (>= 32 chars)
+#   LEDGER_AUTH_ADMIN_PASSWORD    strong admin password
+#   LEDGER_AUTH_TRADER_PASSWORD   strong trader password
+#   LEDGER_AUTH_VIEWER_PASSWORD   strong viewer password
+#   LEDGER_AUTH_COMPLIANCE_PASSWORD strong compliance password
+#   POSTGRES_PASSWORD             strong database password
+# Optional:
+#   ACME_EMAIL                    email for Let's Encrypt expiry notices
 #
 # Usage:
-#   docker compose -f infra/docker-compose.deploy.yml up --build -d
-#   # then open http://<host>:${PUBLIC_PORT:-80}/
+#   docker compose -f infra/docker-compose.public.yml up --build -d
+#   # then open https://${DOMAIN}/
 # ---------------------------------------------------------------------------
 
 services:
@@ -25,7 +32,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-tradepulse}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradepulse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a strong POSTGRES_PASSWORD for public deploy}
       POSTGRES_DB: ${POSTGRES_DB:-tradepulse}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -79,20 +86,16 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/${POSTGRES_DB:-tradepulse}"
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-tradepulse}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-tradepulse}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?set a strong POSTGRES_PASSWORD for public deploy}
       REDIS_URL: "redis://redis:6379/0"
-      # Enable the ledger.updates stream so risk metrics populate automatically.
       LEDGER_STREAM_ENABLED: ${LEDGER_STREAM_ENABLED:-true}
       LEDGER_STREAM_NAME: ${LEDGER_STREAM_NAME:-ledger.updates}
-      # Security overrides (set these in infra/.env to harden the deployment).
-      # Defaults below match the in-repo demo values so local use still works;
-      # DO NOT rely on the defaults when the app is reachable from untrusted
-      # networks. For internet exposure prefer infra/docker-compose.public.yml.
-      LEDGER_JWT_SECRET: ${LEDGER_JWT_SECRET:-change-me-tradepulse-ledger-dev-secret-please-rotate}
-      LEDGER_AUTH_ADMIN_PASSWORD: ${LEDGER_AUTH_ADMIN_PASSWORD:-admin-pw}
-      LEDGER_AUTH_TRADER_PASSWORD: ${LEDGER_AUTH_TRADER_PASSWORD:-trader-pw}
-      LEDGER_AUTH_VIEWER_PASSWORD: ${LEDGER_AUTH_VIEWER_PASSWORD:-viewer-pw}
-      LEDGER_AUTH_COMPLIANCE_PASSWORD: ${LEDGER_AUTH_COMPLIANCE_PASSWORD:-compliance-pw}
+      # --- Security: required for public exposure ---
+      LEDGER_JWT_SECRET: ${LEDGER_JWT_SECRET:?set a strong random LEDGER_JWT_SECRET (>=32 chars)}
+      LEDGER_AUTH_ADMIN_PASSWORD: ${LEDGER_AUTH_ADMIN_PASSWORD:?set a strong LEDGER_AUTH_ADMIN_PASSWORD}
+      LEDGER_AUTH_TRADER_PASSWORD: ${LEDGER_AUTH_TRADER_PASSWORD:?set a strong LEDGER_AUTH_TRADER_PASSWORD}
+      LEDGER_AUTH_VIEWER_PASSWORD: ${LEDGER_AUTH_VIEWER_PASSWORD:?set a strong LEDGER_AUTH_VIEWER_PASSWORD}
+      LEDGER_AUTH_COMPLIANCE_PASSWORD: ${LEDGER_AUTH_COMPLIANCE_PASSWORD:?set a strong LEDGER_AUTH_COMPLIANCE_PASSWORD}
     expose:
       - "8082"
     depends_on:
@@ -115,7 +118,7 @@ services:
       PORT: "8083"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       REDIS_URL: "redis://redis:6379/0"
-      DATABASE_URL: "postgresql://${POSTGRES_USER:-tradepulse}:${POSTGRES_PASSWORD:-tradepulse}@postgres:5432/${POSTGRES_DB:-tradepulse}"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-tradepulse}:${POSTGRES_PASSWORD:?set a strong POSTGRES_PASSWORD for public deploy}@postgres:5432/${POSTGRES_DB:-tradepulse}"
       RISK_DB_PATH: ${RISK_DB_PATH:-/app/data/risk_state.db}
     expose:
       - "8083"
@@ -133,9 +136,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # Dedicated risk stream consumer: reads ledger.updates + market.ticks and
-  # publishes risk.updates, persisting the durable projection to the shared
-  # risk_state volume. Running this makes the Risk page populate automatically.
   risk-worker:
     build:
       context: ../services/risk-engine
@@ -173,12 +173,12 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # The ONLY publicly published service: the single front-door URL.
+  # Internal only: reached by Caddy, not published on the host.
   dashboard:
     build:
       context: ../services/dashboard
-    ports:
-      - "${PUBLIC_PORT:-80}:3000"
+    expose:
+      - "3000"
     depends_on:
       ledger-core:
         condition: service_started
@@ -193,7 +193,27 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # The ONLY publicly published service: TLS termination + single public URL.
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN to your public hostname, e.g. tradepulse.example.com}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      dashboard:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
   risk_state:
+  caddy_data:
+  caddy_config:

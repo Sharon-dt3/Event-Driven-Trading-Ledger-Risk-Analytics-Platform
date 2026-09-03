@@ -100,4 +100,77 @@ does **not** buffer `/stream` so the live feed streams in real time.
 You can (the dev compose `infra/docker-compose.yml` does, for debugging), but for
 a deployment the single-URL model is simpler and safer: one origin, no CORS, no
 per-service DNS, and the backends are not reachable from outside the network.
+
+## Public deployment (HTTPS, anyone on the internet can access)
+
+Use this when you want a shareable public link. It runs the full stack with a
+**Caddy** reverse proxy that terminates TLS and is the only exposed service
+(ports 80 + 443). Everything else — including the dashboard — stays internal.
+
+### Before you expose it: required hardening
+
+The repo ships **demo credentials and a dev JWT secret in source** (fine for
+local use, unsafe on the internet). The public stack therefore **requires**
+strong secrets and will refuse to start without them.
+
+1. Point DNS: create an `A` record for your domain (e.g.
+   `tradepulse.example.com`) at the host's public IP.
+2. Open the firewall / cloud security group for inbound **TCP 80 and 443**
+   (80 is needed for the Let's Encrypt HTTP challenge; 443 serves traffic).
+3. Create `infra/.env` from `.env.example` and set strong values:
+
+   ```bash
+   cd infra
+   cp ../.env.example .env
+   # then edit .env and set:
+   #   DOMAIN=tradepulse.example.com
+   #   POSTGRES_PASSWORD=$(openssl rand -base64 24)
+   #   LEDGER_JWT_SECRET=$(openssl rand -base64 48)
+   #   LEDGER_AUTH_ADMIN_PASSWORD=$(openssl rand -base64 18)
+   #   LEDGER_AUTH_TRADER_PASSWORD=...
+   #   LEDGER_AUTH_VIEWER_PASSWORD=...
+   #   LEDGER_AUTH_COMPLIANCE_PASSWORD=...
+   ```
+
+### Deploy
+
+```bash
+make deploy-public          # brings up the stack + Caddy (TLS)
+make deploy-public-ps       # wait for services to become healthy
+make deploy-public-logs     # follow logs (watch Caddy obtain the certificate)
+make deploy-public-down     # tear everything down
+```
+
+Raw compose equivalent:
+
+```bash
+docker compose -f infra/docker-compose.public.yml up --build -d
+```
+
+Then open the single public URL:
+
+```
+https://<DOMAIN>/
+```
+
+Caddy automatically obtains and renews a Let's Encrypt certificate for
+`DOMAIN`. The SSE feed (`/stream`) works through Caddy without extra config.
+
+### What "public" means here
+
+- **Network:** anyone on the internet can reach `https://<DOMAIN>/`.
+- **Access control:** they land on the login screen. Only accounts whose
+  passwords you set in `.env` (admin / demo_trader / viewer / compliance) can
+  sign in. The old in-repo demo passwords no longer work once you set your own.
+- **Not exposed:** Postgres, Redis, market-data, ledger-core, risk-engine, and
+  the gateway have no host ports — only Caddy is published.
+
+### Recommended extra hardening
+
+- Restrict the security group to trusted source IPs if it's not truly for
+  everyone.
+- Rotate `LEDGER_JWT_SECRET` periodically (invalidates existing sessions).
+- Consider a WAF/rate limiting in front for a fully open demo.
+- Keep `.env` out of git (it already is via `.gitignore`); never commit real
+  secrets.
 ```
