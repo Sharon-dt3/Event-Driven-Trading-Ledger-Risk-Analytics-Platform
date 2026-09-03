@@ -1,8 +1,9 @@
 COMPOSE = docker compose -f infra/docker-compose.yml
 COMPOSE_DEPLOY = docker compose -f infra/docker-compose.deploy.yml
 COMPOSE_PUBLIC = docker compose -f infra/docker-compose.public.yml
+COMPOSE_TUNNEL = docker compose -f infra/docker-compose.tunnel.yml
 
-.PHONY: up down logs ps build restart deploy deploy-down deploy-logs deploy-ps deploy-public deploy-public-down deploy-public-logs deploy-public-ps verify-native verify-native-strict clean
+.PHONY: up down logs ps build restart deploy deploy-down deploy-logs deploy-ps deploy-public deploy-public-down deploy-public-logs deploy-public-ps tunnel tunnel-url tunnel-down tunnel-logs tunnel-ps verify-native verify-native-strict clean
 
 up:
 	$(COMPOSE) up --build -d
@@ -56,6 +57,29 @@ deploy-public-logs:
 
 deploy-public-ps:
 	$(COMPOSE_PUBLIC) ps
+
+# ---- Public deployment via Cloudflare Tunnel (no domain / public IP) ------
+# Easiest way to let anyone on the internet reach the app from a laptop behind
+# NAT. Brings up the full stack + a cloudflared quick tunnel, then prints the
+# public https://<random>.trycloudflare.com URL.
+#   make tunnel        # start the stack + tunnel
+#   make tunnel-url    # print the public URL (wait ~20-40s after `make tunnel`)
+tunnel:
+	$(COMPOSE_TUNNEL) up --build -d
+	@echo "Tunnel starting. In ~20-40s run 'make tunnel-url' to get your public https URL."
+
+tunnel-url:
+	@$(COMPOSE_TUNNEL) logs cloudflared 2>/dev/null | grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | tail -1 \
+		|| echo "URL not ready yet — wait a few seconds and re-run 'make tunnel-url' (or check 'make tunnel-logs')."
+
+tunnel-down:
+	$(COMPOSE_TUNNEL) down -v
+
+tunnel-logs:
+	$(COMPOSE_TUNNEL) logs -f
+
+tunnel-ps:
+	$(COMPOSE_TUNNEL) ps
 
 # Verify each service builds and tests WITHOUT Docker (native toolchains).
 # Useful in restricted/nested environments where the Docker daemon cannot

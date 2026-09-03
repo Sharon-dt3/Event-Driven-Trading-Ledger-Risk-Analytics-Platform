@@ -173,4 +173,57 @@ Caddy automatically obtains and renews a Let's Encrypt certificate for
 - Consider a WAF/rate limiting in front for a fully open demo.
 - Keep `.env` out of git (it already is via `.gitignore`); never commit real
   secrets.
+
+## Public URL without a domain or cloud VM (Cloudflare Tunnel)
+
+If you just want a link **anyone can open from anywhere** and you're running on
+a laptop / home machine behind NAT (no public IP, no domain), use the built-in
+**Cloudflare quick tunnel**. A `cloudflared` container makes an outbound
+connection to Cloudflare and receives a public HTTPS URL that proxies to your
+internal dashboard. No account, no domain, no port-forwarding, no firewall
+changes, and TLS is handled by Cloudflare.
+
+### Before sharing: set credentials
+
+The tunnel URL is world-reachable, so change the demo credentials first.
+Create `infra/.env` and set strong values (usernames stay
+admin / demo_trader / viewer / compliance):
+
+```bash
+cd infra && cp ../.env.example .env
+# set at least:
+#   LEDGER_JWT_SECRET=$(openssl rand -base64 48)
+#   LEDGER_AUTH_ADMIN_PASSWORD=...
+#   LEDGER_AUTH_TRADER_PASSWORD=...
+#   LEDGER_AUTH_VIEWER_PASSWORD=...
+#   LEDGER_AUTH_COMPLIANCE_PASSWORD=...
+#   POSTGRES_PASSWORD=$(openssl rand -base64 24)
+cd ..
+```
+
+(You can skip this to try it out, but the public demo passwords in this repo
+would then work for anyone who has them.)
+
+### Start the tunnel
+
+```bash
+make tunnel        # builds + starts the full stack and the cloudflared tunnel
+make tunnel-url    # wait ~20-40s, then prints https://<random>.trycloudflare.com
+make tunnel-logs   # follow logs (the URL also appears here)
+make tunnel-down   # stop everything
+```
+
+Share the printed `https://<random>.trycloudflare.com` URL — anyone on the
+internet can open it. The live SSE feed (`/stream`) works through the tunnel.
+
+### Notes / limitations
+
+- The quick-tunnel hostname is **random and temporary** — it changes each time
+  you restart `cloudflared`, and Cloudflare rate-limits it. It's ideal for
+  demos and sharing, not a permanent production endpoint.
+- For a **stable custom domain** over the tunnel, create a named tunnel in a
+  (free) Cloudflare account and set a `TUNNEL_TOKEN` instead of the quick
+  `--url` mode. Ask and I can wire that up.
+- For a classic server deployment with your own domain + Let's Encrypt, use the
+  Caddy path above (`make deploy-public`).
 ```
