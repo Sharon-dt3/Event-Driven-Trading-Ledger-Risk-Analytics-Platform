@@ -75,3 +75,9 @@ variable "key_pair_name" {
   type        = string
   default     = ""
 }
+
+variable "enable_cloudfront" {
+  description = "Create the CloudFront distribution in front of the ALB. Brand-new AWS accounts cannot create CloudFront until AWS verifies the account (a free Support request); leave false to go live via the ALB now, then set true and re-apply once verified."
+  type        = bool
+  default     = false
+}

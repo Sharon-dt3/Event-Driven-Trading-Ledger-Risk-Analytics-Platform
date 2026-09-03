@@ -8,6 +8,7 @@ data "aws_cloudfront_origin_request_policy" "all_viewer" {
 }
 
 resource "aws_cloudfront_distribution" "app" {
+  count           = var.enable_cloudfront ? 1 : 0
   enabled         = true
   comment         = "${var.project} front door"
   is_ipv6_enabled = true

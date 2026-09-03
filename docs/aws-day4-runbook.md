@@ -179,3 +179,21 @@ before it can be deleted.
   directly. For the crispest live feed you can also test against `alb_dns_name`.
 - **HTTPS uses the default CloudFront domain.** For a custom domain, add an ACM
   cert (in `us-east-1`) and an `aliases` block to the distribution, plus DNS.
+
+## New AWS accounts: CloudFront must be verified first
+
+Brand-new AWS accounts cannot create CloudFront distributions until AWS verifies
+the account (an anti-abuse check). `terraform apply` will fail only on the
+CloudFront resource with:
+`AccessDenied: Your account must be verified before you can add new CloudFront resources`.
+All other resources (RDS, ElastiCache, EC2, ALB, etc.) still succeed.
+
+To handle this, CloudFront is gated behind `enable_cloudfront` (default `false`):
+
+- **Go live now (no CloudFront):** keep the default. `terraform apply` completes
+  and `live_url` / `alb_url` give you the ALB HTTP URL. Run the validation sweep
+  against that.
+- **Add CloudFront later:** open a free AWS Support case asking to enable
+  CloudFront; once verified, set `enable_cloudfront = true` in `terraform.tfvars`
+  and re-run `terraform apply` — it adds the CDN on top of the existing stack and
+  `live_url` switches to the HTTPS CloudFront URL.

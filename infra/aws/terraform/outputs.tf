@@ -1,11 +1,21 @@
 output "live_url" {
-  description = "Public HTTPS URL (CloudFront) — the single front door."
-  value       = "https://${aws_cloudfront_distribution.app.domain_name}/"
+  description = "Public URL — CloudFront HTTPS when enabled, otherwise the ALB HTTP URL."
+  value = var.enable_cloudfront ? "https://${aws_cloudfront_distribution.app[0].domain_name}/" : "http://${aws_lb.app.dns_name}/"
+}
+
+output "alb_url" {
+  description = "Direct ALB URL (HTTP). Works even when CloudFront is disabled/unverified."
+  value       = "http://${aws_lb.app.dns_name}/"
 }
 
 output "alb_dns_name" {
   description = "Internal ALB DNS (origin behind CloudFront)."
   value       = aws_lb.app.dns_name
+}
+
+output "cloudfront_domain" {
+  description = "CloudFront domain when enabled (empty otherwise)."
+  value       = var.enable_cloudfront ? aws_cloudfront_distribution.app[0].domain_name : ""
 }
 
 output "rds_endpoint" {
