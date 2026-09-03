@@ -3,6 +3,9 @@
 Deployment and local orchestration.
 
 - Local: Docker Compose (PostgreSQL, Redis, and the services).
-- AWS (Phase 10): ECS Fargate, ALB (`/ledger`, `/risk`, `/ws`), RDS PostgreSQL,
-  ElastiCache Redis, S3 + CloudFront, Secrets Manager/SSM, CloudWatch, ECR CI/CD.
-- Status: Phase 0 placeholder (implemented in a later phase).
+- AWS (Day 4): EC2 + Docker Compose behind an ALB and CloudFront, with RDS
+  PostgreSQL, ElastiCache Redis, Secrets Manager, and CloudWatch Logs.
+  Terraform lives in `infra/aws/terraform/`; the AWS Compose file is
+  `infra/docker-compose.aws.yml`.
+- Deploy guide: `docs/aws-day4-runbook.md` (Terraform path + manual-console
+  path + the six-point validation sweep).

@@ -1,0 +1,18 @@
+# Copy to terraform.tfvars and adjust. All have sensible defaults.
+aws_region    = "us-east-1"
+project       = "tradepulse"
+
+# App source (defaults to the public repo/main).
+repo_url    = "https://github.com/Sharon-dt3/Event-Driven-Trading-Ledger-Risk-Analytics-Platform.git"
+repo_branch = "main"
+
+# Sizing. t3.small (2GB) is recommended for the app host; the Java ledger-core
+# can OOM on t3.micro. RDS/ElastiCache micro tiers are fine for a demo.
+instance_type     = "t3.small"
+db_instance_class = "db.t3.micro"
+cache_node_type   = "cache.t3.micro"
+
+# Access. Leave both empty to use SSM Session Manager (no SSH). To enable SSH,
+# set an existing key pair name and your public IP CIDR.
+key_pair_name    = ""
+ssh_ingress_cidr = ""

@@ -1,0 +1,174 @@
+name: tradepulse
+
+# ---------------------------------------------------------------------------
+# AWS deployment Compose file (EC2 + Docker Compose).
+#
+# Unlike docker-compose.deploy.yml, this file does NOT run postgres or redis as
+# containers. On AWS those are managed services:
+#     Postgres  -> Amazon RDS         (RDS_HOST)
+#     Redis     -> Amazon ElastiCache (REDIS_HOST)
+#
+# The EC2 instance's user-data (provisioned by Terraform in infra/aws/terraform)
+# fetches secrets from AWS Secrets Manager and writes infra/.env with:
+#     RDS_HOST, REDIS_HOST, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD,
+#     LEDGER_JWT_SECRET, LEDGER_AUTH_*_PASSWORD,
+#     AWS_REGION, CW_LOG_GROUP
+#
+# Only the dashboard publishes a host port (80); the ALB targets it. Every other
+# service stays on the internal compose network. Container logs are shipped to
+# CloudWatch Logs via the awslogs driver (the EC2 instance role grants access).
+#
+# Run on the instance:
+#   docker compose -f infra/docker-compose.aws.yml up --build -d
+# ---------------------------------------------------------------------------
+
+x-awslogs: &awslogs
+  driver: awslogs
+  options:
+    awslogs-region: "${AWS_REGION}"
+    awslogs-group: "${CW_LOG_GROUP}"
+
+services:
+  market-data:
+    build:
+      context: ../services
+      dockerfile: market-data/Dockerfile
+    environment:
+      PORT: "8081"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REDIS_ADDR: "${REDIS_HOST}:6379"
+      MARKET_DATA_STREAM: ${MARKET_DATA_STREAM:-market.ticks}
+      MARKET_DATA_SYMBOLS: ${MARKET_DATA_SYMBOLS:-AAPL,MSFT,GOOG}
+      MARKET_DATA_TICK_INTERVAL_MS: ${MARKET_DATA_TICK_INTERVAL_MS:-1000}
+      MARKET_DATA_SOURCE: ${MARKET_DATA_SOURCE:-synthetic}
+    expose:
+      - "8081"
+    logging:
+      <<: *awslogs
+      options:
+        awslogs-region: "${AWS_REGION}"
+        awslogs-group: "${CW_LOG_GROUP}"
+        awslogs-stream: market-data
+    restart: unless-stopped
+
+  ledger-core:
+    build:
+      context: ../services/ledger-core
+    environment:
+      SERVER_PORT: "8082"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://${RDS_HOST}:5432/${POSTGRES_DB:-tradepulse}"
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-tradepulse}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_URL: "redis://${REDIS_HOST}:6379/0"
+      LEDGER_STREAM_ENABLED: ${LEDGER_STREAM_ENABLED:-true}
+      LEDGER_STREAM_NAME: ${LEDGER_STREAM_NAME:-ledger.updates}
+      LEDGER_JWT_SECRET: ${LEDGER_JWT_SECRET}
+      LEDGER_AUTH_ADMIN_PASSWORD: ${LEDGER_AUTH_ADMIN_PASSWORD}
+      LEDGER_AUTH_TRADER_PASSWORD: ${LEDGER_AUTH_TRADER_PASSWORD}
+      LEDGER_AUTH_VIEWER_PASSWORD: ${LEDGER_AUTH_VIEWER_PASSWORD}
+      LEDGER_AUTH_COMPLIANCE_PASSWORD: ${LEDGER_AUTH_COMPLIANCE_PASSWORD}
+    expose:
+      - "8082"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/8082'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    logging:
+      <<: *awslogs
+      options:
+        awslogs-region: "${AWS_REGION}"
+        awslogs-group: "${CW_LOG_GROUP}"
+        awslogs-stream: ledger-core
+    restart: unless-stopped
+
+  risk-engine:
+    build:
+      context: ../services/risk-engine
+    environment:
+      PORT: "8083"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REDIS_URL: "redis://${REDIS_HOST}:6379/0"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-tradepulse}:${POSTGRES_PASSWORD}@${RDS_HOST}:5432/${POSTGRES_DB:-tradepulse}"
+      RISK_DB_PATH: ${RISK_DB_PATH:-/app/data/risk_state.db}
+    expose:
+      - "8083"
+    volumes:
+      - risk_state:/app/data
+    logging:
+      <<: *awslogs
+      options:
+        awslogs-region: "${AWS_REGION}"
+        awslogs-group: "${CW_LOG_GROUP}"
+        awslogs-stream: risk-engine
+    restart: unless-stopped
+
+  risk-worker:
+    build:
+      context: ../services/risk-engine
+    command: ["python", "-m", "app.worker"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REDIS_URL: "redis://${REDIS_HOST}:6379/0"
+      RISK_DB_PATH: ${RISK_DB_PATH:-/app/data/risk_state.db}
+    volumes:
+      - risk_state:/app/data
+    depends_on:
+      ledger-core:
+        condition: service_started
+    logging:
+      <<: *awslogs
+      options:
+        awslogs-region: "${AWS_REGION}"
+        awslogs-group: "${CW_LOG_GROUP}"
+        awslogs-stream: risk-worker
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ../services
+      dockerfile: gateway/Dockerfile
+    environment:
+      PORT: "8084"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      REDIS_ADDR: "${REDIS_HOST}:6379"
+    expose:
+      - "8084"
+    logging:
+      <<: *awslogs
+      options:
+        awslogs-region: "${AWS_REGION}"
+        awslogs-group: "${CW_LOG_GROUP}"
+        awslogs-stream: gateway
+    restart: unless-stopped
+
+  # The only service published on the host; the ALB targets port 80.
+  dashboard:
+    build:
+      context: ../services/dashboard
+    ports:
+      - "80:3000"
+    depends_on:
+      ledger-core:
+        condition: service_started
+      risk-engine:
+        condition: service_started
+      gateway:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      <<: *awslogs
+      options:
+        awslogs-region: "${AWS_REGION}"
+        awslogs-group: "${CW_LOG_GROUP}"
+        awslogs-stream: dashboard
+    restart: unless-stopped
+
+volumes:
+  risk_state:

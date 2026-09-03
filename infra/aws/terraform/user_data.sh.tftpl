@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Provisioned by Terraform. Installs Docker, pulls secrets from Secrets Manager,
+# writes infra/.env, and starts the AWS Compose stack (app containers only;
+# Postgres->RDS, Redis->ElastiCache).
+set -euo pipefail
+exec > >(tee /var/log/tradepulse-bootstrap.log) 2>&1
+
+REGION="${aws_region}"
+SECRET_ARN="${secret_arn}"
+APP_DIR=/opt/tradepulse
+
+echo "[bootstrap] installing docker + git + jq ..."
+dnf install -y docker git jq
+systemctl enable --now docker
+
+# Docker Compose plugin
+mkdir -p /usr/libexec/docker/cli-plugins
+curl -fsSL "https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64" \
+  -o /usr/libexec/docker/cli-plugins/docker-compose
+chmod +x /usr/libexec/docker/cli-plugins/docker-compose
+
+echo "[bootstrap] cloning repo ..."
+git clone --branch "${repo_branch}" "${repo_url}" "$APP_DIR"
+
+echo "[bootstrap] fetching secrets ..."
+SECRET_JSON="$(aws secretsmanager get-secret-value --region "$REGION" --secret-id "$SECRET_ARN" --query SecretString --output text)"
+
+get() { echo "$SECRET_JSON" | jq -r ".$1"; }
+
+echo "[bootstrap] writing infra/.env ..."
+cat > "$APP_DIR/infra/.env" <<EOF
+AWS_REGION=$REGION
+CW_LOG_GROUP=${cw_log_group}
+RDS_HOST=${rds_host}
+REDIS_HOST=${redis_host}
+POSTGRES_DB=${db_name}
+POSTGRES_USER=${db_username}
+POSTGRES_PASSWORD=$(get POSTGRES_PASSWORD)
+LEDGER_JWT_SECRET=$(get LEDGER_JWT_SECRET)
+LEDGER_AUTH_ADMIN_PASSWORD=$(get LEDGER_AUTH_ADMIN_PASSWORD)
+LEDGER_AUTH_TRADER_PASSWORD=$(get LEDGER_AUTH_TRADER_PASSWORD)
+LEDGER_AUTH_VIEWER_PASSWORD=$(get LEDGER_AUTH_VIEWER_PASSWORD)
+LEDGER_AUTH_COMPLIANCE_PASSWORD=$(get LEDGER_AUTH_COMPLIANCE_PASSWORD)
+EOF
+chmod 600 "$APP_DIR/infra/.env"
+
+echo "[bootstrap] starting stack ..."
+cd "$APP_DIR"
+docker compose -f infra/docker-compose.aws.yml build
+docker compose -f infra/docker-compose.aws.yml up -d
+
+echo "[bootstrap] done."
